@@ -34,10 +34,9 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Editor de PDF"
-APP_VERSION = "0.1"
-A4_W = 595.276
-A4_H = 841.890
-MIN_MARGIN_PT = 6.0
+APP_VERSION = "0.1.1"
+STANDARD_PAGE_W = 595.276  # largura A4 em pontos; todas as paginas internas usam esta largura
+CONTENT_MARGIN_PT = 2.0    # margem interna minima (aprox. 0,7 mm)
 
 
 def base_dir() -> Path:
@@ -338,9 +337,10 @@ class EditorPDF(QMainWindow):
 
         info = QLabel(
             "Padrão do PDF:\n"
-            "• A4 automático (retrato/paisagem)\n"
-            "• Proporção preservada\n"
-            "• Margem mínima\n"
+            "• Capa inteira, sem corte e sem borda branca\n"
+            "• Páginas internas com largura padronizada\n"
+            "• Altura automática para reduzir espaços brancos\n"
+            "• Proporção preservada e margem mínima\n"
             "• PDF original preservado em vetor quando não editado"
         )
         info.setWordWrap(True)
@@ -637,31 +637,34 @@ class EditorPDF(QMainWindow):
         return img
 
     @staticmethod
-    def _page_rect_for_aspect(aspect: float) -> fitz.Rect:
-        if aspect > 1.0:
-            w, h = A4_H, A4_W
-        else:
-            w, h = A4_W, A4_H
-        return fitz.Rect(0, 0, w, h)
+    def _dynamic_page_rect(content_width: float, content_height: float, margin: float = CONTENT_MARGIN_PT) -> tuple[fitz.Rect, fitz.Rect]:
+        """
+        Cria uma pagina com largura fixa e altura ajustada ao conteudo.
+        O conteudo nunca e cortado nem deformado; sobra apenas a margem minima.
+        """
+        content_width = max(1.0, float(content_width))
+        content_height = max(1.0, float(content_height))
+        inner_w = STANDARD_PAGE_W - (2.0 * margin)
+        scale = inner_w / content_width
+        inner_h = content_height * scale
+        page_h = inner_h + (2.0 * margin)
+        page_rect = fitz.Rect(0, 0, STANDARD_PAGE_W, page_h)
+        inner_rect = fitz.Rect(margin, margin, STANDARD_PAGE_W - margin, page_h - margin)
+        return page_rect, inner_rect
 
-    @staticmethod
-    def _inner_rect(page_rect: fitz.Rect) -> fitz.Rect:
-        return fitz.Rect(
-            MIN_MARGIN_PT,
-            MIN_MARGIN_PT,
-            page_rect.width - MIN_MARGIN_PT,
-            page_rect.height - MIN_MARGIN_PT,
-        )
-
-    def _insert_image_page(self, out: fitz.Document, image_path: Path | str, dpi: int = 300):
+    def _insert_cover_page(self, out: fitz.Document, image_path: Path | str):
+        """Insere a capa inteira, sem recorte, sem deformacao e sem borda branca."""
         with Image.open(image_path) as raw:
             img = ImageOps.exif_transpose(raw).convert("RGB")
-            aspect = img.width / max(1, img.height)
-            page_rect = self._page_rect_for_aspect(aspect)
-            page = out.new_page(width=page_rect.width, height=page_rect.height)
+            page_w = STANDARD_PAGE_W
+            page_h = page_w * (img.height / max(1, img.width))
+            page_rect = fitz.Rect(0, 0, page_w, page_h)
+            page = out.new_page(width=page_w, height=page_h)
+
+            # PNG e usado para evitar perda adicional de qualidade na capa.
             buffer = io.BytesIO()
-            img.save(buffer, format="JPEG", quality=96, optimize=True)
-            page.insert_image(self._inner_rect(page_rect), stream=buffer.getvalue(), keep_proportion=True)
+            img.save(buffer, format="PNG")
+            page.insert_image(page_rect, stream=buffer.getvalue(), keep_proportion=True)
 
     def generate_pdf(self):
         ordered = self.page_order()
@@ -684,7 +687,7 @@ class EditorPDF(QMainWindow):
             if self.cover_check.isChecked():
                 if not self.default_cover.exists():
                     raise RuntimeError("A capa padrão não foi encontrada.")
-                self._insert_image_page(out, self.default_cover, dpi=dpi)
+                self._insert_cover_page(out, self.default_cover)
 
             for index, page_data in enumerate(ordered, start=1):
                 self.statusBar().showMessage(f"Gerando página {index} de {len(ordered)}...")
@@ -697,22 +700,21 @@ class EditorPDF(QMainWindow):
                     src = pdf_cache[page_data.path]
                     src_page = src.load_page(page_data.page_no)
                     r = src_page.rect
-                    aspect = r.width / max(1, r.height)
-                    page_rect = self._page_rect_for_aspect(aspect)
+                    page_rect, content_rect = self._dynamic_page_rect(r.width, r.height)
                     new_page = out.new_page(width=page_rect.width, height=page_rect.height)
                     new_page.show_pdf_page(
-                        self._inner_rect(page_rect), src, page_data.page_no, keep_proportion=True
+                        content_rect, src, page_data.page_no, keep_proportion=True
                     )
                     continue
 
                 img = self._pil_for_page(page_data, dpi=dpi)
-                aspect = img.width / max(1, img.height)
-                page_rect = self._page_rect_for_aspect(aspect)
+                page_rect, content_rect = self._dynamic_page_rect(img.width, img.height)
                 new_page = out.new_page(width=page_rect.width, height=page_rect.height)
                 buffer = io.BytesIO()
-                img.save(buffer, format="JPEG", quality=95, optimize=True)
+                # Alta qualidade para paginas rasterizadas/editadas.
+                img.save(buffer, format="JPEG", quality=97, subsampling=0, optimize=True)
                 new_page.insert_image(
-                    self._inner_rect(page_rect), stream=buffer.getvalue(), keep_proportion=True
+                    content_rect, stream=buffer.getvalue(), keep_proportion=True
                 )
 
             if out.page_count == 0:

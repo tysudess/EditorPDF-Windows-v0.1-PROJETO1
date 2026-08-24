@@ -1,55 +1,39 @@
-# Editor de PDF — Windows Portable v0.1
+# Editor de PDF — Windows Portable v0.1.1 LAYOUT FIX
 
-Aplicativo para montar e editar PDFs seguindo o padrão usado no projeto de capas de jornais.
+Aplicativo para montar, editar e gerar PDFs.
+
+## Ajuste desta versão
+
+- **Capa padrão:** entra inteira no PDF, sem cortar nenhuma parte, sem deformar e sem borda branca.
+- A página da capa adapta a própria altura à proporção original da imagem.
+- **Páginas internas:** usam a mesma largura padrão.
+- A altura de cada página interna é calculada automaticamente conforme a proporção do conteúdo.
+- A margem branca interna foi reduzida para aproximadamente **0,7 mm**.
+- PDFs importados sem edição continuam sendo inseridos em formato vetorial sempre que possível.
+- Páginas recortadas ou giradas são rasterizadas em alta qualidade.
 
 ## Funções
 
-- adicionar imagens (PNG, JPG, JPEG, WEBP, BMP e TIFF);
-- adicionar PDFs com uma ou várias páginas;
-- pré-visualização e miniaturas;
-- reorganizar e excluir páginas;
-- girar páginas;
-- recorte visual com o mouse;
-- capa padrão **RADAR DE NOTÍCIAS — MÍDIA IMPRESSA**;
-- incluir ou não a capa como primeira página;
-- trocar a capa padrão;
-- qualidade Alta, Média ou Compacta para páginas editadas;
-- gerar o PDF final e abrir a pasta de destino.
+- adicionar imagens;
+- adicionar PDFs com múltiplas páginas;
+- recortar visualmente;
+- girar;
+- excluir e reorganizar páginas;
+- capa padrão opcional;
+- alterar/restaurar a capa padrão;
+- gerar PDF final;
+- Windows Portable sem instalação.
 
-## Padrão do PDF
+## Build manual no GitHub
 
-- A4 automático em retrato ou paisagem conforme o conteúdo;
-- proporção original preservada;
-- margem mínima;
-- sem esticar ou deformar imagens;
-- PDFs sem edição preservam o conteúdo vetorial sempre que possível;
-- recortes e rotações não alteram o arquivo original.
+O workflow está em:
 
-## Correção STORAGE-FIX
+`.github/workflows/build-windows.yml`
 
-Este pacote corrige o erro do GitHub Actions:
+Vá em **Actions > Build Editor de PDF - Windows > Run workflow**.
 
-`Failed to CreateArtifact: Artifact storage quota has been hit`
+O workflow não usa `actions/upload-artifact`; o ZIP é publicado diretamente em **Releases v0.1.1**, evitando o erro de quota de armazenamento de Artifacts.
 
-O workflow **não usa mais `actions/upload-artifact`**. O ZIP gerado é publicado diretamente em **GitHub Releases**, evitando a cota de armazenamento dos Artifacts.
+Arquivo esperado no Release:
 
-O workflow também ficou somente manual (`workflow_dispatch`), para não executar um novo build a cada alteração no repositório.
-
-## Como usar no GitHub
-
-1. Substitua os arquivos do seu repositório pelos arquivos deste pacote, principalmente `.github/workflows/build-windows.yml`.
-2. Entre na aba **Actions**.
-3. Abra **Build Editor de PDF - Windows**.
-4. Clique em **Run workflow**.
-5. Depois de concluído, abra **Releases**.
-6. Baixe `Editor-de-PDF-Windows-Portable-v0.1.zip` na Release `v0.1.0`.
-
-## Build local no Windows
-
-Se preferir gerar o executável no próprio computador, execute:
-
-`build-windows.bat`
-
-O executável será criado em:
-
-`dist/Editor-de-PDF.exe`
+`Editor-de-PDF-Windows-Portable-v0.1.1.zip`
