@@ -42,17 +42,17 @@ jobs:
           Copy-Item "dist/Editor-de-PDF.exe" "pacote/Editor-de-PDF.exe"
           Copy-Item "assets/capa_padrao.png" "pacote/CAPA-PADRAO.png"
           Copy-Item "README.md" "pacote/README.md"
-          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.1.zip" -Force
+          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.1.1.zip" -Force
 
       # IMPORTANTE: nao usa actions/upload-artifact.
       # Assim evita o erro "Artifact storage quota has been hit".
-      - name: Publicar diretamente no Release v0.1.0
+      - name: Publicar diretamente no Release v0.1.1
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.1.0"
-          $arquivo = "Editor-de-PDF-Windows-Portable-v0.1.zip"
+          $tag = "v0.1.1"
+          $arquivo = "Editor-de-PDF-Windows-Portable-v0.1.1.zip"
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
@@ -60,6 +60,6 @@ jobs:
           }
           else {
             gh release create $tag $arquivo `
-              --title "Editor de PDF v0.1.0" `
-              --notes "Versao Windows Portable do Editor de PDF. O arquivo e publicado diretamente em Releases, sem usar o armazenamento de Artifacts do GitHub Actions."
+              --title "Editor de PDF v0.1.1" `
+              --notes "Versao Windows Portable v0.1.1. Capa sem corte e sem borda branca; paginas internas com largura padronizada e altura automatica para minimizar espacos brancos. Publicacao direta em Releases, sem Artifacts."
           }
