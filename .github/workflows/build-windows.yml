@@ -1,0 +1,50 @@
+name: Build Editor de PDF - Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Gerar executavel portable
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed `
+            --name "Editor-de-PDF" `
+            --add-data "assets/capa_padrao.png;assets" `
+            --collect-all PySide6 `
+            main.py
+
+      - name: Montar pacote
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path pacote | Out-Null
+          Copy-Item "dist/Editor-de-PDF.exe" "pacote/Editor-de-PDF.exe"
+          Copy-Item "assets/capa_padrao.png" "pacote/CAPA-PADRAO.png"
+          Copy-Item "README.md" "pacote/README.md"
+          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.1.zip" -Force
+
+      - name: Publicar artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: Editor-de-PDF-Windows-Portable-v0.1
+          path: Editor-de-PDF-Windows-Portable-v0.1.zip
+          if-no-files-found: error
