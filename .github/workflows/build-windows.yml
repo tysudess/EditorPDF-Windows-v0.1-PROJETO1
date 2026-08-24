@@ -2,8 +2,9 @@ name: Build Editor de PDF - Windows
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ "main", "master" ]
+
+permissions:
+  contents: write
 
 jobs:
   build-windows:
@@ -17,6 +18,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
 
       - name: Instalar dependencias
         shell: pwsh
@@ -42,9 +44,22 @@ jobs:
           Copy-Item "README.md" "pacote/README.md"
           Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.1.zip" -Force
 
-      - name: Publicar artefato
-        uses: actions/upload-artifact@v4
-        with:
-          name: Editor-de-PDF-Windows-Portable-v0.1
-          path: Editor-de-PDF-Windows-Portable-v0.1.zip
-          if-no-files-found: error
+      # IMPORTANTE: nao usa actions/upload-artifact.
+      # Assim evita o erro "Artifact storage quota has been hit".
+      - name: Publicar diretamente no Release v0.1.0
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v0.1.0"
+          $arquivo = "Editor-de-PDF-Windows-Portable-v0.1.zip"
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $arquivo --clobber
+          }
+          else {
+            gh release create $tag $arquivo `
+              --title "Editor de PDF v0.1.0" `
+              --notes "Versao Windows Portable do Editor de PDF. O arquivo e publicado diretamente em Releases, sem usar o armazenamento de Artifacts do GitHub Actions."
+          }
