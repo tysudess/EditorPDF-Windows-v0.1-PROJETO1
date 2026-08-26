@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QListView,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -34,9 +35,11 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Editor de PDF"
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.0"
 STANDARD_PAGE_W = 595.276  # largura A4 em pontos; todas as paginas internas usam esta largura
 CONTENT_MARGIN_PT = 2.0    # margem interna minima (aprox. 0,7 mm)
+SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+SUPPORTED_DROP_EXTS = SUPPORTED_IMAGE_EXTS | {".pdf"}
 
 
 def base_dir() -> Path:
@@ -175,12 +178,56 @@ class CropLabel(QLabel):
             painter.drawRect(self._rubber)
 
 
+class PageListWidget(QListWidget):
+    """Lista que mantém a reordenação interna e também aceita arquivos do Explorer."""
+
+    filesDropped = Signal(list)
+
+    @staticmethod
+    def _local_supported_paths(event) -> list[str]:
+        if not event.mimeData().hasUrls():
+            return []
+        paths: list[str] = []
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            path = url.toLocalFile()
+            if Path(path).is_file() and Path(path).suffix.lower() in SUPPORTED_DROP_EXTS:
+                paths.append(path)
+        return paths
+
+    def dragEnterEvent(self, event):
+        if self._local_supported_paths(event):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if self._local_supported_paths(event):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        paths = self._local_supported_paths(event)
+        if paths:
+            self.filesDropped.emit(paths)
+            event.acceptProposedAction()
+            return
+        # Continua permitindo arrastar as miniaturas para reorganizar páginas.
+        super().dropEvent(event)
+
+
 class EditorPDF(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME}  v{APP_VERSION}")
-        self.resize(1260, 790)
-        self.setMinimumSize(980, 650)
+        icon_path = resource_path("assets/editor_pdf_icon.ico")
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+        self.resize(1480, 900)
+        self.setMinimumSize(1120, 720)
+        self.setAcceptDrops(True)
 
         self.pages: dict[str, PageData] = {}
         self.current_uid: Optional[str] = None
@@ -200,187 +247,302 @@ class EditorPDF(QMainWindow):
         return resource_path("assets/capa_padrao.png")
 
     def _build_ui(self):
-        toolbar = QToolBar("Principal")
-        toolbar.setMovable(False)
-        self.addToolBar(toolbar)
-
-        act_img = QAction("Adicionar imagem", self)
-        act_img.triggered.connect(self.add_images)
-        toolbar.addAction(act_img)
-
-        act_pdf = QAction("Adicionar PDF", self)
-        act_pdf.triggered.connect(self.add_pdf)
-        toolbar.addAction(act_pdf)
-
-        toolbar.addSeparator()
-        act_gen = QAction("Gerar PDF", self)
-        act_gen.triggered.connect(self.generate_pdf)
-        toolbar.addAction(act_gen)
-
         root = QWidget()
+        root.setObjectName("appRoot")
         self.setCentralWidget(root)
-        root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(12, 12, 12, 12)
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        title = QLabel("EDITOR DE PDF")
-        title.setObjectName("title")
-        subtitle = QLabel("Importe, recorte, organize e gere PDFs no padrão de capas")
-        subtitle.setObjectName("subtitle")
-        root_layout.addWidget(title)
-        root_layout.addWidget(subtitle)
+        # Cabeçalho moderno
+        header = QFrame()
+        header.setObjectName("header")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(22, 14, 22, 14)
+        header_layout.setSpacing(12)
+
+        logo = QLabel()
+        icon_png = resource_path("assets/editor_pdf_icon.png")
+        if icon_png.exists():
+            logo.setPixmap(QPixmap(str(icon_png)).scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        logo.setFixedSize(52, 52)
+        header_layout.addWidget(logo)
+
+        title_box = QVBoxLayout()
+        title_box.setSpacing(0)
+        title = QLabel("Editor de PDF")
+        title.setObjectName("appTitle")
+        subtitle = QLabel("Organize, edite e exporte documentos com rapidez")
+        subtitle.setObjectName("appSubtitle")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        header_layout.addLayout(title_box)
+        header_layout.addStretch(1)
+
+        btn_top_img = QPushButton("＋  Imagem")
+        btn_top_img.setObjectName("topAction")
+        btn_top_img.clicked.connect(self.add_images)
+        btn_top_pdf = QPushButton("▣  PDF")
+        btn_top_pdf.setObjectName("topAction")
+        btn_top_pdf.clicked.connect(self.add_pdf)
+        btn_top_export = QPushButton("Exportar PDF")
+        btn_top_export.setObjectName("topPrimary")
+        btn_top_export.clicked.connect(self.generate_pdf)
+        header_layout.addWidget(btn_top_img)
+        header_layout.addWidget(btn_top_pdf)
+        header_layout.addWidget(btn_top_export)
+        outer.addWidget(header)
+
+        workspace = QWidget()
+        workspace_layout = QVBoxLayout(workspace)
+        workspace_layout.setContentsMargins(18, 16, 18, 12)
+        workspace_layout.setSpacing(12)
+        outer.addWidget(workspace, 1)
 
         splitter = QSplitter(Qt.Horizontal)
-        root_layout.addWidget(splitter, 1)
+        splitter.setChildrenCollapsible(False)
+        workspace_layout.addWidget(splitter, 1)
 
-        # Left panel
+        # AÇÕES — coluna esquerda
         left = QFrame()
         left.setObjectName("panel")
+        left.setMinimumWidth(235)
+        left.setMaximumWidth(290)
         left_layout = QVBoxLayout(left)
-        left_layout.addWidget(QLabel("PÁGINAS"))
+        left_layout.setContentsMargins(16, 16, 16, 16)
+        left_layout.setSpacing(10)
 
-        self.list = QListWidget()
-        self.list.setIconSize(QSize(70, 95))
-        self.list.setDragDropMode(QListWidget.InternalMove)
-        self.list.setDefaultDropAction(Qt.MoveAction)
-        self.list.currentItemChanged.connect(self.on_current_changed)
-        left_layout.addWidget(self.list, 1)
+        left_title = QLabel("AÇÕES")
+        left_title.setObjectName("sectionTitle")
+        left_layout.addWidget(left_title)
 
-        row1 = QHBoxLayout()
-        btn_img = QPushButton("+ Imagem")
+        btn_img = QPushButton("▧   Adicionar imagem")
+        btn_img.setObjectName("primaryAction")
+        btn_img.setMinimumHeight(52)
         btn_img.clicked.connect(self.add_images)
-        btn_pdf = QPushButton("+ PDF")
+        left_layout.addWidget(btn_img)
+
+        btn_pdf = QPushButton("▣   Adicionar PDF")
+        btn_pdf.setObjectName("secondaryAction")
+        btn_pdf.setMinimumHeight(52)
         btn_pdf.clicked.connect(self.add_pdf)
-        row1.addWidget(btn_img)
-        row1.addWidget(btn_pdf)
-        left_layout.addLayout(row1)
+        left_layout.addWidget(btn_pdf)
 
-        row2 = QHBoxLayout()
-        btn_up = QPushButton("↑")
-        btn_up.setToolTip("Mover página para cima")
-        btn_up.clicked.connect(lambda: self.move_current(-1))
-        btn_down = QPushButton("↓")
-        btn_down.setToolTip("Mover página para baixo")
-        btn_down.clicked.connect(lambda: self.move_current(1))
-        btn_del = QPushButton("Excluir")
-        btn_del.clicked.connect(self.delete_current)
-        row2.addWidget(btn_up)
-        row2.addWidget(btn_down)
-        row2.addWidget(btn_del)
-        left_layout.addLayout(row2)
+        btn_cover = QPushButton("▤   Alterar capa padrão")
+        btn_cover.setObjectName("secondaryAction")
+        btn_cover.setMinimumHeight(52)
+        btn_cover.clicked.connect(self.choose_cover)
+        left_layout.addWidget(btn_cover)
 
+        drop = QLabel("☁\n\nArraste imagens\nou PDFs aqui\n\nJPG • PNG • WebP • PDF")
+        drop.setObjectName("dropZone")
+        drop.setAlignment(Qt.AlignCenter)
+        drop.setMinimumHeight(180)
+        drop.setWordWrap(True)
+        left_layout.addWidget(drop)
+
+        tip = QLabel("ⓘ  Você também pode reorganizar as páginas arrastando as miniaturas na faixa inferior.")
+        tip.setObjectName("tipBox")
+        tip.setWordWrap(True)
+        left_layout.addWidget(tip)
+        left_layout.addStretch(1)
         splitter.addWidget(left)
 
-        # Center preview
+        # PRÉ-VISUALIZAÇÃO — centro
         center = QFrame()
         center.setObjectName("panel")
         center_layout = QVBoxLayout(center)
-        center_layout.addWidget(QLabel("PRÉ-VISUALIZAÇÃO"))
+        center_layout.setContentsMargins(14, 14, 14, 14)
+        center_layout.setSpacing(10)
+
+        center_head = QHBoxLayout()
+        preview_title = QLabel("PRÉ-VISUALIZAÇÃO")
+        preview_title.setObjectName("sectionTitle")
+        center_head.addWidget(preview_title)
+        center_head.addStretch(1)
+        self.page_indicator = QLabel("Nenhuma página selecionada")
+        self.page_indicator.setObjectName("mutedText")
+        center_head.addWidget(self.page_indicator)
+        center_layout.addLayout(center_head)
+
         self.preview = CropLabel()
+        self.preview.setObjectName("previewArea")
         self.preview.cropSelected.connect(self.apply_crop)
         center_layout.addWidget(self.preview, 1)
 
-        edit_row = QHBoxLayout()
-        self.btn_crop = QPushButton("Recortar")
+        edit_bar = QFrame()
+        edit_bar.setObjectName("editBar")
+        edit_row = QHBoxLayout(edit_bar)
+        edit_row.setContentsMargins(8, 8, 8, 8)
+        edit_row.setSpacing(7)
+
+        self.btn_crop = QPushButton("⌗  Selecionar corte")
+        self.btn_crop.setObjectName("editPrimary")
         self.btn_crop.clicked.connect(self.toggle_crop)
         btn_clear_crop = QPushButton("Remover recorte")
         btn_clear_crop.clicked.connect(self.clear_crop)
-        btn_left = QPushButton("↶ Girar")
+        btn_left = QPushButton("↶  Girar à esquerda")
         btn_left.clicked.connect(lambda: self.rotate_current(-90))
-        btn_right = QPushButton("Girar ↷")
+        btn_right = QPushButton("↷  Girar à direita")
         btn_right.clicked.connect(lambda: self.rotate_current(90))
-        edit_row.addWidget(self.btn_crop)
-        edit_row.addWidget(btn_clear_crop)
-        edit_row.addWidget(btn_left)
-        edit_row.addWidget(btn_right)
-        center_layout.addLayout(edit_row)
-
+        btn_del = QPushButton("⌫  Excluir")
+        btn_del.clicked.connect(self.delete_current)
+        for b in (self.btn_crop, btn_clear_crop, btn_left, btn_right, btn_del):
+            edit_row.addWidget(b)
+        center_layout.addWidget(edit_bar)
         splitter.addWidget(center)
 
-        # Right panel
+        # CONFIGURAÇÕES — coluna direita
         right = QFrame()
         right.setObjectName("panel")
+        right.setMinimumWidth(280)
+        right.setMaximumWidth(340)
         right_layout = QVBoxLayout(right)
-        right_layout.addWidget(QLabel("PDF FINAL"))
+        right_layout.setContentsMargins(16, 16, 16, 16)
+        right_layout.setSpacing(10)
+
+        right_title = QLabel("CONFIGURAÇÕES")
+        right_title.setObjectName("sectionTitle")
+        right_layout.addWidget(right_title)
 
         cover_box = QFrame()
-        cover_box.setObjectName("softPanel")
+        cover_box.setObjectName("settingsCard")
         cb_layout = QVBoxLayout(cover_box)
-        self.cover_check = QCheckBox("Incluir capa padrão como primeira página")
+        cb_layout.setContentsMargins(12, 12, 12, 12)
+        self.cover_check = QCheckBox("Incluir capa padrão")
         self.cover_check.setChecked(True)
         cb_layout.addWidget(self.cover_check)
-
         self.cover_preview = QLabel()
         self.cover_preview.setAlignment(Qt.AlignCenter)
-        self.cover_preview.setMinimumHeight(190)
-        self.cover_preview.setMaximumHeight(240)
-        self.cover_preview.setStyleSheet("background:#11151c; border-radius:6px;")
+        self.cover_preview.setMinimumHeight(145)
+        self.cover_preview.setMaximumHeight(175)
+        self.cover_preview.setObjectName("coverPreview")
         cb_layout.addWidget(self.cover_preview)
-        self.refresh_cover_preview()
-
         cover_buttons = QHBoxLayout()
-        btn_cover = QPushButton("Alterar capa")
-        btn_cover.clicked.connect(self.choose_cover)
-        btn_reset_cover = QPushButton("Restaurar")
-        btn_reset_cover.clicked.connect(self.reset_cover)
-        cover_buttons.addWidget(btn_cover)
-        cover_buttons.addWidget(btn_reset_cover)
+        btn_change = QPushButton("Trocar capa")
+        btn_change.clicked.connect(self.choose_cover)
+        btn_reset = QPushButton("Restaurar")
+        btn_reset.clicked.connect(self.reset_cover)
+        cover_buttons.addWidget(btn_change)
+        cover_buttons.addWidget(btn_reset)
         cb_layout.addLayout(cover_buttons)
         right_layout.addWidget(cover_box)
+        self.refresh_cover_preview()
 
-        right_layout.addSpacing(8)
-        right_layout.addWidget(QLabel("Qualidade para páginas editadas"))
+        quality_box = QFrame()
+        quality_box.setObjectName("settingsCard")
+        q_layout = QVBoxLayout(quality_box)
+        q_layout.setContentsMargins(12, 12, 12, 12)
+        q_label = QLabel("Qualidade")
+        q_label.setObjectName("fieldLabel")
+        q_layout.addWidget(q_label)
         self.quality = QComboBox()
-        self.quality.addItem("Alta - 300 dpi", 300)
-        self.quality.addItem("Média - 220 dpi", 220)
-        self.quality.addItem("Compacta - 160 dpi", 160)
-        right_layout.addWidget(self.quality)
+        self.quality.addItem("Alta (300 DPI)", 300)
+        self.quality.addItem("Média (220 DPI)", 220)
+        self.quality.addItem("Compacta (160 DPI)", 160)
+        q_layout.addWidget(self.quality)
+        right_layout.addWidget(quality_box)
 
+        format_box = QFrame()
+        format_box.setObjectName("settingsCard")
+        f_layout = QVBoxLayout(format_box)
+        f_layout.setContentsMargins(12, 12, 12, 12)
         info = QLabel(
-            "Padrão do PDF:\n"
-            "• Capa inteira, sem corte e sem borda branca\n"
-            "• Páginas internas com largura padronizada\n"
-            "• Altura automática para reduzir espaços brancos\n"
-            "• Proporção preservada e margem mínima\n"
-            "• PDF original preservado em vetor quando não editado"
+            "PDF inteligente\n\n"
+            "• Capa sempre inteira, sem corte\n"
+            "• Largura padronizada\n"
+            "• Altura automática\n"
+            "• Margem mínima\n"
+            "• Vetor preservado quando possível"
         )
-        info.setWordWrap(True)
         info.setObjectName("info")
-        right_layout.addWidget(info)
+        info.setWordWrap(True)
+        f_layout.addWidget(info)
+        right_layout.addWidget(format_box)
         right_layout.addStretch(1)
 
-        btn_generate = QPushButton("GERAR PDF")
+        btn_generate = QPushButton("▣   GERAR PDF")
         btn_generate.setObjectName("generate")
-        btn_generate.setMinimumHeight(48)
+        btn_generate.setMinimumHeight(58)
         btn_generate.clicked.connect(self.generate_pdf)
         right_layout.addWidget(btn_generate)
-
         splitter.addWidget(right)
-        splitter.setSizes([270, 690, 300])
+        splitter.setSizes([250, 820, 310])
+
+        # Faixa de miniaturas inferior
+        pages_panel = QFrame()
+        pages_panel.setObjectName("pagesPanel")
+        pages_layout = QVBoxLayout(pages_panel)
+        pages_layout.setContentsMargins(12, 10, 12, 10)
+        pages_layout.setSpacing(7)
+
+        pages_head = QHBoxLayout()
+        pages_title = QLabel("PÁGINAS")
+        pages_title.setObjectName("sectionTitle")
+        pages_head.addWidget(pages_title)
+        pages_head.addWidget(QLabel("arraste para reordenar"))
+        pages_head.addStretch(1)
+        self.pages_count = QLabel("0 página(s)")
+        self.pages_count.setObjectName("mutedText")
+        pages_head.addWidget(self.pages_count)
+        pages_layout.addLayout(pages_head)
+
+        self.list = PageListWidget()
+        self.list.setViewMode(QListView.IconMode)
+        self.list.setFlow(QListView.LeftToRight)
+        self.list.setWrapping(False)
+        self.list.setResizeMode(QListView.Adjust)
+        self.list.setMovement(QListView.Snap)
+        self.list.setIconSize(QSize(105, 105))
+        self.list.setGridSize(QSize(150, 132))
+        self.list.setSpacing(6)
+        self.list.setFixedHeight(142)
+        self.list.setDragDropMode(QListWidget.InternalMove)
+        self.list.setDefaultDropAction(Qt.MoveAction)
+        self.list.currentItemChanged.connect(self.on_current_changed)
+        self.list.filesDropped.connect(self.import_dropped_files)
+        pages_layout.addWidget(self.list)
+        workspace_layout.addWidget(pages_panel)
 
         self.setStatusBar(QStatusBar())
 
     def _apply_theme(self):
         self.setStyleSheet("""
-            QMainWindow, QWidget { background:#0d1117; color:#e7edf5; font-size:13px; }
-            QToolBar { background:#111722; border-bottom:1px solid #273041; spacing:7px; padding:6px; }
-            QToolButton { background:#1b2431; border:1px solid #344156; border-radius:6px; padding:7px 10px; }
-            QToolButton:hover { background:#263244; }
-            #title { font-size:24px; font-weight:800; letter-spacing:1px; }
-            #subtitle { color:#91a0b5; margin-bottom:5px; }
-            #panel { background:#121821; border:1px solid #263143; border-radius:10px; }
-            #softPanel { background:#161d28; border:1px solid #2a3547; border-radius:8px; }
-            QPushButton { background:#1a2432; border:1px solid #34445a; border-radius:7px; padding:8px 10px; }
-            QPushButton:hover { background:#243349; }
-            QPushButton:pressed { background:#152033; }
-            #generate { background:#26456f; font-weight:800; font-size:14px; }
-            #generate:hover { background:#315a8f; }
-            QListWidget { background:#0f141c; border:1px solid #263143; border-radius:7px; padding:4px; }
-            QListWidget::item { padding:6px; border-radius:6px; }
-            QListWidget::item:selected { background:#27364b; }
-            QComboBox { background:#111722; border:1px solid #34445a; border-radius:6px; padding:7px; }
-            QCheckBox { spacing:8px; }
-            #info { color:#a9b6c8; background:#10161f; border:1px solid #253043; border-radius:7px; padding:10px; }
-            QStatusBar { background:#0b0f15; color:#9eacbf; }
+            * { font-family: 'Segoe UI'; font-size: 13px; }
+            QMainWindow, #appRoot { background:#0b1220; color:#eef4ff; }
+            #header { background:#101b2b; border-bottom:1px solid #26384f; }
+            #appTitle { font-size:26px; font-weight:700; color:#f5f8ff; }
+            #appSubtitle, #mutedText { color:#8fa3bd; }
+            #panel, #pagesPanel { background:#111d2c; border:1px solid #263950; border-radius:12px; }
+            #sectionTitle { color:#c7d3e3; font-size:13px; font-weight:700; letter-spacing:1px; }
+            QPushButton { background:#1a2a3e; color:#edf4ff; border:1px solid #314861; border-radius:8px; padding:9px 12px; }
+            QPushButton:hover { background:#233951; border-color:#47709a; }
+            QPushButton:pressed { background:#152639; }
+            #primaryAction, #topPrimary, #generate, #editPrimary { background:#1769d2; border:1px solid #2c82ea; font-weight:700; }
+            #primaryAction:hover, #topPrimary:hover, #generate:hover, #editPrimary:hover { background:#2379e5; }
+            #secondaryAction { text-align:left; padding-left:16px; }
+            #topAction, #topPrimary { min-height:34px; }
+            #dropZone { background:#0e1826; color:#aebed1; border:1px dashed #667b93; border-radius:10px; padding:14px; font-size:14px; }
+            #tipBox { color:#a3b4c8; background:#142235; border:1px solid #28405a; border-radius:8px; padding:10px; }
+            #previewArea { background:#0b1420; border:1px solid #263a51; border-radius:10px; }
+            #editBar { background:#0e1826; border:1px solid #263950; border-radius:9px; }
+            #settingsCard { background:#152235; border:1px solid #2a4058; border-radius:10px; }
+            #coverPreview { background:#0b1420; border:1px solid #263a51; border-radius:7px; }
+            #fieldLabel { color:#c7d3e3; font-weight:600; }
+            #info { color:#9fb1c7; line-height:1.35; }
+            QComboBox { background:#0e1928; color:#eef4ff; border:1px solid #38516d; border-radius:7px; padding:9px; }
+            QComboBox QAbstractItemView { background:#101b2b; color:#eef4ff; selection-background-color:#1769d2; }
+            QCheckBox { color:#eef4ff; spacing:8px; }
+            QListWidget { background:#0d1724; border:1px solid #253a51; border-radius:9px; padding:5px; outline:0; }
+            QListWidget::item { background:#152235; border:1px solid #2a4058; border-radius:8px; padding:5px; margin:2px; }
+            QListWidget::item:hover { border-color:#4c759e; background:#1a2c42; }
+            QListWidget::item:selected { background:#163e70; border:2px solid #2f8cff; color:white; }
+            QSplitter::handle { background:#0b1220; width:7px; }
+            QStatusBar { background:#09101a; color:#90a4bc; border-top:1px solid #1f3146; }
+            QScrollBar:horizontal { height:9px; background:#0d1724; }
+            QScrollBar::handle:horizontal { background:#38516d; border-radius:4px; min-width:30px; }
+            QScrollBar:vertical { width:9px; background:#0d1724; }
+            QScrollBar::handle:vertical { background:#38516d; border-radius:4px; min-height:30px; }
         """)
 
     def page_order(self) -> list[PageData]:
@@ -390,6 +552,95 @@ class EditorPDF(QMainWindow):
             if uid in self.pages:
                 ordered.append(self.pages[uid])
         return ordered
+
+    @staticmethod
+    def _supported_local_paths(event) -> list[str]:
+        if not event.mimeData().hasUrls():
+            return []
+        paths: list[str] = []
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            path = url.toLocalFile()
+            if Path(path).is_file() and Path(path).suffix.lower() in SUPPORTED_DROP_EXTS:
+                paths.append(path)
+        return paths
+
+    def dragEnterEvent(self, event):
+        if self._supported_local_paths(event):
+            self.statusBar().showMessage("Solte para adicionar imagens/PDFs ao projeto")
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event):
+        if self._supported_local_paths(event):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self.statusBar().showMessage("Pronto", 1500)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event):
+        paths = self._supported_local_paths(event)
+        if not paths:
+            event.ignore()
+            return
+        self.import_dropped_files(paths)
+        event.acceptProposedAction()
+
+    def import_dropped_files(self, paths: list[str]):
+        """Importa imagens e PDFs misturados, mantendo a ordem em que foram soltos."""
+        added_images = 0
+        added_pdf_pages = 0
+        failed: list[tuple[str, str]] = []
+
+        for p in paths:
+            suffix = Path(p).suffix.lower()
+            if suffix in SUPPORTED_IMAGE_EXTS:
+                try:
+                    # Valida antes de inserir para evitar um item quebrado na lista.
+                    with Image.open(p) as img:
+                        img.verify()
+                    page = PageData(uid=str(uuid.uuid4()), kind="image", path=p)
+                    self.pages[page.uid] = page
+                    self._add_list_item(page, Path(p).name)
+                    added_images += 1
+                except Exception as exc:
+                    failed.append((p, str(exc)))
+            elif suffix == ".pdf":
+                try:
+                    doc = fitz.open(p)
+                    count = doc.page_count
+                    doc.close()
+                    for n in range(count):
+                        page = PageData(uid=str(uuid.uuid4()), kind="pdf", path=p, page_no=n)
+                        self.pages[page.uid] = page
+                        self._add_list_item(page, f"{Path(p).name} — pág. {n+1}")
+                        added_pdf_pages += 1
+                except Exception as exc:
+                    failed.append((p, str(exc)))
+
+        total = added_images + added_pdf_pages
+        if total:
+            parts = []
+            if added_images:
+                parts.append(f"{added_images} imagem(ns)")
+            if added_pdf_pages:
+                parts.append(f"{added_pdf_pages} página(s) de PDF")
+            self.statusBar().showMessage("Adicionado por arrastar e soltar: " + " + ".join(parts), 5000)
+
+        if failed:
+            detalhes = "\n\n".join(f"{Path(path).name}: {erro}" for path, erro in failed[:5])
+            if len(failed) > 5:
+                detalhes += f"\n\n... e mais {len(failed) - 5} arquivo(s)."
+            QMessageBox.warning(
+                self,
+                APP_NAME,
+                "Alguns arquivos não puderam ser adicionados:\n\n" + detalhes,
+            )
 
     def add_images(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -429,6 +680,8 @@ class EditorPDF(QMainWindow):
         if thumb:
             item.setIcon(QIcon(thumb))
         self.list.addItem(item)
+        if hasattr(self, "pages_count"):
+            self.pages_count.setText(f"{self.list.count()} página(s)")
         if self.list.count() == 1:
             self.list.setCurrentRow(0)
 
@@ -445,11 +698,15 @@ class EditorPDF(QMainWindow):
         if not current:
             self.current_uid = None
             self.preview.set_source_pixmap(None)
+            if hasattr(self, "page_indicator"):
+                self.page_indicator.setText("Nenhuma página selecionada")
             return
         self.current_uid = current.data(Qt.UserRole)
+        if hasattr(self, "page_indicator"):
+            self.page_indicator.setText(current.text())
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("Recortar")
+        self.btn_crop.setText("⌗  Selecionar corte")
         self.refresh_preview()
 
     def current_page(self) -> Optional[PageData]:
@@ -500,7 +757,7 @@ class EditorPDF(QMainWindow):
             return
         self.crop_mode = not self.crop_mode
         self.preview.set_crop_mode(self.crop_mode)
-        self.btn_crop.setText("Cancelar recorte" if self.crop_mode else "Recortar")
+        self.btn_crop.setText("Cancelar seleção" if self.crop_mode else "⌗  Selecionar corte")
         self.refresh_preview(full_for_crop=self.crop_mode)
         if self.crop_mode:
             self.statusBar().showMessage("Arraste sobre a área que deseja manter.")
@@ -512,7 +769,7 @@ class EditorPDF(QMainWindow):
         page.crop = (x, y, w, h)
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("Recortar")
+        self.btn_crop.setText("⌗  Selecionar corte")
         self.refresh_preview()
         self.refresh_current_thumbnail()
         self.statusBar().showMessage("Recorte aplicado. O arquivo original não foi alterado.", 4500)
@@ -524,7 +781,7 @@ class EditorPDF(QMainWindow):
         page.crop = None
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("Recortar")
+        self.btn_crop.setText("⌗  Selecionar corte")
         self.refresh_preview()
         self.refresh_current_thumbnail()
         self.statusBar().showMessage("Recorte removido.", 3000)
@@ -556,6 +813,8 @@ class EditorPDF(QMainWindow):
         uid = item.data(Qt.UserRole)
         self.list.takeItem(row)
         self.pages.pop(uid, None)
+        if hasattr(self, "pages_count"):
+            self.pages_count.setText(f"{self.list.count()} página(s)")
         if self.list.count():
             self.list.setCurrentRow(min(row, self.list.count() - 1))
         else:
@@ -760,6 +1019,7 @@ class EditorPDF(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setWindowIcon(QIcon(str(resource_path("assets/editor_pdf_icon.png"))))
     window = EditorPDF()
     window.show()
     sys.exit(app.exec())

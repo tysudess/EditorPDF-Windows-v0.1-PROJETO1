@@ -14,7 +14,9 @@ if exist build rmdir /s /q build
 
 python -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name "Editor-de-PDF" ^
+  --icon "assets\editor_pdf_icon.ico" ^
   --add-data "assets\capa_padrao.png;assets" ^
+  --add-data "assets\editor_pdf_icon.png;assets" ^
   --collect-all PySide6 ^
   main.py
 
