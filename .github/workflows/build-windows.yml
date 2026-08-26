@@ -31,7 +31,9 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean --onefile --windowed `
             --name "Editor-de-PDF" `
+            --icon "assets/editor_pdf_icon.ico" `
             --add-data "assets/capa_padrao.png;assets" `
+            --add-data "assets/editor_pdf_icon.png;assets" `
             --collect-all PySide6 `
             main.py
 
@@ -42,17 +44,17 @@ jobs:
           Copy-Item "dist/Editor-de-PDF.exe" "pacote/Editor-de-PDF.exe"
           Copy-Item "assets/capa_padrao.png" "pacote/CAPA-PADRAO.png"
           Copy-Item "README.md" "pacote/README.md"
-          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.1.1.zip" -Force
+          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.2.0.zip" -Force
 
       # IMPORTANTE: nao usa actions/upload-artifact.
       # Assim evita o erro "Artifact storage quota has been hit".
-      - name: Publicar diretamente no Release v0.1.1
+      - name: Publicar diretamente no Release v0.2.0
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.1.1"
-          $arquivo = "Editor-de-PDF-Windows-Portable-v0.1.1.zip"
+          $tag = "v0.2.0"
+          $arquivo = "Editor-de-PDF-Windows-Portable-v0.2.0.zip"
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
@@ -60,6 +62,6 @@ jobs:
           }
           else {
             gh release create $tag $arquivo `
-              --title "Editor de PDF v0.1.1" `
-              --notes "Versao Windows Portable v0.1.1. Capa sem corte e sem borda branca; paginas internas com largura padronizada e altura automatica para minimizar espacos brancos. Publicacao direta em Releases, sem Artifacts."
+              --title "Editor de PDF v0.2.0" `
+              --notes "Versao Windows Portable v0.2.0 com novo layout moderno e acessivel, tema escuro, faixa horizontal de miniaturas, arrastar e soltar imagens/PDFs, icone moderno, capa sem corte e PDF com altura automatica. Publicacao direta em Releases, sem Artifacts."
           }
