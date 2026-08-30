@@ -1,3 +1,4 @@
+import copy
 import io
 import json
 import os
@@ -11,7 +12,7 @@ from typing import Optional, Tuple
 import fitz  # PyMuPDF
 from PIL import Image, ImageOps
 from PySide6.QtCore import Qt, QRect, QRectF, QSize, Signal
-from PySide6.QtGui import QAction, QIcon, QImage, QPainter, QPen, QPixmap, QTransform
+from PySide6.QtGui import QAction, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -35,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Editor de PDF"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.2"
 STANDARD_PAGE_W = 595.276  # largura A4 em pontos; todas as paginas internas usam esta largura
 CONTENT_MARGIN_PT = 2.0    # margem interna minima (aprox. 0,7 mm)
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
@@ -232,12 +233,14 @@ class EditorPDF(QMainWindow):
         self.pages: dict[str, PageData] = {}
         self.current_uid: Optional[str] = None
         self.crop_mode = False
+        self.undo_stack: list[dict] = []
         self.config = load_config()
 
         self.default_cover = self._resolve_cover_path()
 
         self._build_ui()
         self._apply_theme()
+        self._setup_shortcuts()
         self.statusBar().showMessage("Pronto")
 
     def _resolve_cover_path(self) -> Path:
@@ -279,6 +282,11 @@ class EditorPDF(QMainWindow):
         header_layout.addLayout(title_box)
         header_layout.addStretch(1)
 
+        self.btn_undo = QPushButton("↶  Desfazer  Ctrl+Z")
+        self.btn_undo.setObjectName("topAction")
+        self.btn_undo.setEnabled(False)
+        self.btn_undo.clicked.connect(self.undo_last_action)
+
         btn_top_img = QPushButton("＋  Imagem")
         btn_top_img.setObjectName("topAction")
         btn_top_img.clicked.connect(self.add_images)
@@ -288,6 +296,7 @@ class EditorPDF(QMainWindow):
         btn_top_export = QPushButton("Exportar PDF")
         btn_top_export.setObjectName("topPrimary")
         btn_top_export.clicked.connect(self.generate_pdf)
+        header_layout.addWidget(self.btn_undo)
         header_layout.addWidget(btn_top_img)
         header_layout.addWidget(btn_top_pdf)
         header_layout.addWidget(btn_top_export)
@@ -334,10 +343,37 @@ class EditorPDF(QMainWindow):
         btn_cover.clicked.connect(self.choose_cover)
         left_layout.addWidget(btn_cover)
 
+        # Todas as ferramentas de edição ficam FORA da área de pré-visualização.
+        edit_tools = QFrame()
+        edit_tools.setObjectName("cropToolsCard")
+        tools_layout = QVBoxLayout(edit_tools)
+        tools_layout.setContentsMargins(10, 10, 10, 10)
+        tools_layout.setSpacing(7)
+        tools_title = QLabel("EDIÇÃO DA PÁGINA")
+        tools_title.setObjectName("fieldLabel")
+        tools_layout.addWidget(tools_title)
+
+        self.btn_crop = QPushButton("⌗  Selecionar corte")
+        self.btn_crop.setObjectName("editPrimary")
+        self.btn_crop.clicked.connect(self.toggle_crop)
+        self.btn_clear_crop = QPushButton("Remover recorte")
+        self.btn_clear_crop.clicked.connect(self.clear_crop)
+        btn_left = QPushButton("↶  Girar à esquerda")
+        btn_left.clicked.connect(lambda: self.rotate_current(-90))
+        btn_right = QPushButton("↷  Girar à direita")
+        btn_right.clicked.connect(lambda: self.rotate_current(90))
+        btn_del = QPushButton("⌫  Excluir página")
+        btn_del.clicked.connect(self.delete_current)
+
+        for b in (self.btn_crop, self.btn_clear_crop, btn_left, btn_right, btn_del):
+            b.setMinimumHeight(38)
+            tools_layout.addWidget(b)
+        left_layout.addWidget(edit_tools)
+
         drop = QLabel("☁\n\nArraste imagens\nou PDFs aqui\n\nJPG • PNG • WebP • PDF")
         drop.setObjectName("dropZone")
         drop.setAlignment(Qt.AlignCenter)
-        drop.setMinimumHeight(180)
+        drop.setMinimumHeight(130)
         drop.setWordWrap(True)
         left_layout.addWidget(drop)
 
@@ -370,26 +406,6 @@ class EditorPDF(QMainWindow):
         self.preview.cropSelected.connect(self.apply_crop)
         center_layout.addWidget(self.preview, 1)
 
-        edit_bar = QFrame()
-        edit_bar.setObjectName("editBar")
-        edit_row = QHBoxLayout(edit_bar)
-        edit_row.setContentsMargins(8, 8, 8, 8)
-        edit_row.setSpacing(7)
-
-        self.btn_crop = QPushButton("⌗  Selecionar corte")
-        self.btn_crop.setObjectName("editPrimary")
-        self.btn_crop.clicked.connect(self.toggle_crop)
-        btn_clear_crop = QPushButton("Remover recorte")
-        btn_clear_crop.clicked.connect(self.clear_crop)
-        btn_left = QPushButton("↶  Girar à esquerda")
-        btn_left.clicked.connect(lambda: self.rotate_current(-90))
-        btn_right = QPushButton("↷  Girar à direita")
-        btn_right.clicked.connect(lambda: self.rotate_current(90))
-        btn_del = QPushButton("⌫  Excluir")
-        btn_del.clicked.connect(self.delete_current)
-        for b in (self.btn_crop, btn_clear_crop, btn_left, btn_right, btn_del):
-            edit_row.addWidget(b)
-        center_layout.addWidget(edit_bar)
         splitter.addWidget(center)
 
         # CONFIGURAÇÕES — coluna direita
@@ -526,7 +542,7 @@ class EditorPDF(QMainWindow):
             #tipBox { color:#a3b4c8; background:#142235; border:1px solid #28405a; border-radius:8px; padding:10px; }
             #previewArea { background:#0b1420; border:1px solid #263a51; border-radius:10px; }
             #editBar { background:#0e1826; border:1px solid #263950; border-radius:9px; }
-            #settingsCard { background:#152235; border:1px solid #2a4058; border-radius:10px; }
+            #settingsCard, #cropToolsCard { background:#152235; border:1px solid #2a4058; border-radius:10px; }
             #coverPreview { background:#0b1420; border:1px solid #263a51; border-radius:7px; }
             #fieldLabel { color:#c7d3e3; font-weight:600; }
             #info { color:#9fb1c7; line-height:1.35; }
@@ -544,6 +560,83 @@ class EditorPDF(QMainWindow):
             QScrollBar:vertical { width:9px; background:#0d1724; }
             QScrollBar::handle:vertical { background:#38516d; border-radius:4px; min-height:30px; }
         """)
+
+    def _setup_shortcuts(self):
+        self.undo_action = QAction("Desfazer", self)
+        self.undo_action.setShortcut(QKeySequence.Undo)
+        self.undo_action.setShortcutContext(Qt.ApplicationShortcut)
+        self.undo_action.triggered.connect(self.undo_last_action)
+        self.addAction(self.undo_action)
+        self._update_undo_ui()
+
+    def _update_undo_ui(self):
+        enabled = bool(self.undo_stack)
+        if hasattr(self, "undo_action"):
+            self.undo_action.setEnabled(enabled)
+        if hasattr(self, "btn_undo"):
+            self.btn_undo.setEnabled(enabled)
+
+    def _page_label(self, page: PageData) -> str:
+        if page.kind == "pdf":
+            return f"{Path(page.path).name} — pág. {page.page_no + 1}"
+        return Path(page.path).name
+
+    def _push_undo(self, description: str):
+        order = []
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            order.append((item.data(Qt.UserRole), item.text()))
+        self.undo_stack.append({
+            "description": description,
+            "pages": copy.deepcopy(self.pages),
+            "order": order,
+            "current_uid": self.current_uid,
+        })
+        if len(self.undo_stack) > 30:
+            self.undo_stack.pop(0)
+        self._update_undo_ui()
+
+    def undo_last_action(self):
+        if not self.undo_stack:
+            return
+        snapshot = self.undo_stack.pop()
+        self.pages = copy.deepcopy(snapshot["pages"])
+
+        self.list.blockSignals(True)
+        self.list.clear()
+        selected_row = -1
+        for row, (uid, label) in enumerate(snapshot["order"]):
+            page = self.pages.get(uid)
+            if not page:
+                continue
+            item = QListWidgetItem(label or self._page_label(page))
+            item.setData(Qt.UserRole, uid)
+            thumb = self.make_thumbnail(page)
+            if thumb:
+                item.setIcon(QIcon(thumb))
+            self.list.addItem(item)
+            if uid == snapshot.get("current_uid"):
+                selected_row = row
+        self.list.blockSignals(False)
+
+        self.crop_mode = False
+        self.preview.set_crop_mode(False)
+        self.btn_crop.setText("⌗  Selecionar corte")
+        if hasattr(self, "pages_count"):
+            self.pages_count.setText(f"{self.list.count()} página(s)")
+
+        if self.list.count():
+            if selected_row < 0 or selected_row >= self.list.count():
+                selected_row = 0
+            self.list.setCurrentRow(selected_row)
+            self.on_current_changed(self.list.currentItem(), None)
+        else:
+            self.current_uid = None
+            self.preview.set_source_pixmap(None)
+            self.page_indicator.setText("Nenhuma página selecionada")
+
+        self._update_undo_ui()
+        self.statusBar().showMessage(f"Desfeito: {snapshot.get('description', 'última ação')}", 4000)
 
     def page_order(self) -> list[PageData]:
         ordered = []
@@ -766,6 +859,7 @@ class EditorPDF(QMainWindow):
         page = self.current_page()
         if not page:
             return
+        self._push_undo("recorte")
         page.crop = (x, y, w, h)
         self.crop_mode = False
         self.preview.set_crop_mode(False)
@@ -778,6 +872,9 @@ class EditorPDF(QMainWindow):
         page = self.current_page()
         if not page:
             return
+        if page.crop is None:
+            return
+        self._push_undo("remoção do recorte")
         page.crop = None
         self.crop_mode = False
         self.preview.set_crop_mode(False)
@@ -790,6 +887,7 @@ class EditorPDF(QMainWindow):
         page = self.current_page()
         if not page:
             return
+        self._push_undo("giro da página")
         page.rotation = (page.rotation + delta) % 360
         if page.crop is not None:
             page.crop = None
@@ -811,6 +909,7 @@ class EditorPDF(QMainWindow):
         if row < 0 or not item:
             return
         uid = item.data(Qt.UserRole)
+        self._push_undo("exclusão da página")
         self.list.takeItem(row)
         self.pages.pop(uid, None)
         if hasattr(self, "pages_count"):
