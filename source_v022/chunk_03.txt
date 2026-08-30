@@ -1,0 +1,220 @@
+
+    def dragEnterEvent(self, event):
+        if self._supported_local_paths(event):
+            self.statusBar().showMessage("Solte para adicionar imagens/PDFs ao projeto")
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event):
+        if self._supported_local_paths(event):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self.statusBar().showMessage("Pronto", 1500)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event):
+        paths = self._supported_local_paths(event)
+        if not paths:
+            event.ignore()
+            return
+        self.import_dropped_files(paths)
+        event.acceptProposedAction()
+
+    def import_dropped_files(self, paths: list[str]):
+        """Importa imagens e PDFs misturados, mantendo a ordem em que foram soltos."""
+        added_images = 0
+        added_pdf_pages = 0
+        failed: list[tuple[str, str]] = []
+
+        for p in paths:
+            suffix = Path(p).suffix.lower()
+            if suffix in SUPPORTED_IMAGE_EXTS:
+                try:
+                    # Valida antes de inserir para evitar um item quebrado na lista.
+                    with Image.open(p) as img:
+                        img.verify()
+                    page = PageData(uid=str(uuid.uuid4()), kind="image", path=p)
+                    self.pages[page.uid] = page
+                    self._add_list_item(page, Path(p).name)
+                    added_images += 1
+                except Exception as exc:
+                    failed.append((p, str(exc)))
+            elif suffix == ".pdf":
+                try:
+                    doc = fitz.open(p)
+                    count = doc.page_count
+                    doc.close()
+                    for n in range(count):
+                        page = PageData(uid=str(uuid.uuid4()), kind="pdf", path=p, page_no=n)
+                        self.pages[page.uid] = page
+                        self._add_list_item(page, f"{Path(p).name} — pág. {n+1}")
+                        added_pdf_pages += 1
+                except Exception as exc:
+                    failed.append((p, str(exc)))
+
+        total = added_images + added_pdf_pages
+        if total:
+            parts = []
+            if added_images:
+                parts.append(f"{added_images} imagem(ns)")
+            if added_pdf_pages:
+                parts.append(f"{added_pdf_pages} página(s) de PDF")
+            self.statusBar().showMessage("Adicionado por arrastar e soltar: " + " + ".join(parts), 5000)
+
+        if failed:
+            detalhes = "\n\n".join(f"{Path(path).name}: {erro}" for path, erro in failed[:5])
+            if len(failed) > 5:
+                detalhes += f"\n\n... e mais {len(failed) - 5} arquivo(s)."
+            QMessageBox.warning(
+                self,
+                APP_NAME,
+                "Alguns arquivos não puderam ser adicionados:\n\n" + detalhes,
+            )
+
+    def add_images(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Adicionar imagens", "", "Imagens (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff)"
+        )
+        if not paths:
+            return
+        for p in paths:
+            page = PageData(uid=str(uuid.uuid4()), kind="image", path=p)
+            self.pages[page.uid] = page
+            self._add_list_item(page, Path(p).name)
+        self.statusBar().showMessage(f"{len(paths)} imagem(ns) adicionada(s)", 4000)
+
+    def add_pdf(self):
+        paths, _ = QFileDialog.getOpenFileNames(self, "Adicionar PDF", "", "PDF (*.pdf)")
+        if not paths:
+            return
+        total = 0
+        for p in paths:
+            try:
+                doc = fitz.open(p)
+                count = doc.page_count
+                doc.close()
+                for n in range(count):
+                    page = PageData(uid=str(uuid.uuid4()), kind="pdf", path=p, page_no=n)
+                    self.pages[page.uid] = page
+                    self._add_list_item(page, f"{Path(p).name} — pág. {n+1}")
+                    total += 1
+            except Exception as exc:
+                QMessageBox.warning(self, APP_NAME, f"Não foi possível abrir:\n{p}\n\n{exc}")
+        self.statusBar().showMessage(f"{total} página(s) de PDF adicionada(s)", 4000)
+
+    def _add_list_item(self, page: PageData, label: str):
+        item = QListWidgetItem(label)
+        item.setData(Qt.UserRole, page.uid)
+        thumb = self.make_thumbnail(page)
+        if thumb:
+            item.setIcon(QIcon(thumb))
+        self.list.addItem(item)
+        if hasattr(self, "pages_count"):
+            self.pages_count.setText(f"{self.list.count()} página(s)")
+        if self.list.count() == 1:
+            self.list.setCurrentRow(0)
+
+    def make_thumbnail(self, page: PageData) -> Optional[QPixmap]:
+        try:
+            img = self.render_qimage(page, dpi=55, apply_crop=True)
+            if img.isNull():
+                return None
+            return QPixmap.fromImage(img).scaled(70, 95, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        except Exception:
+            return None
+
+    def on_current_changed(self, current, previous):
+        if not current:
+            self.current_uid = None
+            self.preview.set_source_pixmap(None)
+            if hasattr(self, "page_indicator"):
+                self.page_indicator.setText("Nenhuma página selecionada")
+            return
+        self.current_uid = current.data(Qt.UserRole)
+        if hasattr(self, "page_indicator"):
+            self.page_indicator.setText(current.text())
+        self.crop_mode = False
+        self.preview.set_crop_mode(False)
+        self.btn_crop.setText("⌗  Selecionar corte")
+        self.refresh_preview()
+
+    def current_page(self) -> Optional[PageData]:
+        if self.current_uid:
+            return self.pages.get(self.current_uid)
+        return None
+
+    def refresh_preview(self, full_for_crop: bool = False):
+        page = self.current_page()
+        if not page:
+            self.preview.set_source_pixmap(None)
+            return
+        try:
+            img = self.render_qimage(page, dpi=125, apply_crop=not full_for_crop)
+            self.preview.set_source_pixmap(QPixmap.fromImage(img))
+        except Exception as exc:
+            QMessageBox.warning(self, APP_NAME, f"Erro na pré-visualização:\n{exc}")
+
+    def render_qimage(self, page: PageData, dpi: int = 120, apply_crop: bool = True) -> QImage:
+        if page.kind == "image":
+            img = QImage(page.path)
+            if img.isNull():
+                raise RuntimeError("Imagem inválida ou formato não suportado.")
+        else:
+            doc = fitz.open(page.path)
+            p = doc.load_page(page.page_no)
+            scale = dpi / 72.0
+            pix = p.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            data = pix.tobytes("png")
+            doc.close()
+            img = QImage.fromData(data)
+
+        if page.rotation:
+            img = img.transformed(QTransform().rotate(page.rotation), Qt.SmoothTransformation)
+
+        if apply_crop and page.crop:
+            x, y, w, h = page.crop
+            rx = max(0, min(img.width() - 1, round(x * img.width())))
+            ry = max(0, min(img.height() - 1, round(y * img.height())))
+            rw = max(1, min(img.width() - rx, round(w * img.width())))
+            rh = max(1, min(img.height() - ry, round(h * img.height())))
+            img = img.copy(rx, ry, rw, rh)
+        return img
+
+    def toggle_crop(self):
+        page = self.current_page()
+        if not page:
+            return
+        self.crop_mode = not self.crop_mode
+        self.preview.set_crop_mode(self.crop_mode)
+        self.btn_crop.setText("Cancelar seleção" if self.crop_mode else "⌗  Selecionar corte")
+        self.refresh_preview(full_for_crop=self.crop_mode)
+        if self.crop_mode:
+            self.statusBar().showMessage("Arraste sobre a área que deseja manter.")
+
+    def apply_crop(self, x: float, y: float, w: float, h: float):
+        page = self.current_page()
+        if not page:
+            return
+        self._push_undo("recorte")
+        page.crop = (x, y, w, h)
+        self.crop_mode = False
+        self.preview.set_crop_mode(False)
+        self.btn_crop.setText("⌗  Selecionar corte")
+        self.refresh_preview()
+        self.refresh_current_thumbnail()
+        self.statusBar().showMessage("Recorte aplicado. O arquivo original não foi alterado.", 4500)
+
+    def clear_crop(self):
+        page = self.current_page()
+        if not page:
+            return
+        if page.crop is None:
+            return
+        self._push_undo("remoção do recorte")
+        page.crop = None
+        self.crop_mode = False
+        self.preview.set_crop_mode(False)
