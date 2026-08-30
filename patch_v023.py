@@ -3,6 +3,10 @@ from pathlib import Path
 path = Path('main.py')
 text = path.read_text(encoding='utf-8')
 
+if 'APP_VERSION = "0.2.3"' in text:
+    print('main.py já está na v0.2.3; nenhum ajuste necessário.')
+    raise SystemExit(0)
+
 replacements = [
     ('APP_VERSION = "0.2.2"', 'APP_VERSION = "0.2.3"'),
     ('self.setMinimumSize(420, 520)', 'self.setMinimumSize(260, 260)'),
@@ -40,28 +44,24 @@ for old, new in replacements:
         raise SystemExit(f'Trecho não encontrado: {old}')
     text = text.replace(old, new, 1)
 
-# Evita que o tamanho natural do pixmap force a pré-visualização para além do espaço disponível.
 needle = "        self._rubber = QRect()\n\n    def set_crop_mode(self, enabled: bool):"
 insert = "        self._rubber = QRect()\n\n    def sizeHint(self):\n        return QSize(640, 480)\n\n    def minimumSizeHint(self):\n        return QSize(260, 260)\n\n    def set_crop_mode(self, enabled: bool):"
 if needle not in text:
     raise SystemExit('Ponto de inserção do sizeHint não encontrado')
 text = text.replace(needle, insert, 1)
 
-# Mantém a dica compacta e totalmente visível.
 needle = "        tip.setWordWrap(True)\n        left_layout.addWidget(tip)"
 insert = "        tip.setWordWrap(True)\n        tip.setMaximumHeight(68)\n        left_layout.addWidget(tip)"
 if needle not in text:
     raise SystemExit('Ponto de ajuste da dica não encontrado')
 text = text.replace(needle, insert, 1)
 
-# Compacta o card informativo da direita para evitar cortes em telas menores.
 needle = "        info.setWordWrap(True)\n        f_layout.addWidget(info)"
 insert = "        info.setWordWrap(True)\n        info.setMaximumHeight(130)\n        f_layout.addWidget(info)"
 if needle not in text:
     raise SystemExit('Ponto de ajuste do card PDF inteligente não encontrado')
 text = text.replace(needle, insert, 1)
 
-# Melhora a distribuição do splitter, priorizando a pré-visualização.
 needle = "        splitter.setChildrenCollapsible(False)\n        workspace_layout.addWidget(splitter, 1)"
 insert = "        splitter.setChildrenCollapsible(False)\n        splitter.setHandleWidth(6)\n        workspace_layout.addWidget(splitter, 1)"
 if needle not in text:
