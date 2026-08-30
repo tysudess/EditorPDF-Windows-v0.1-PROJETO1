@@ -5,11 +5,10 @@ on:
   push:
     branches: [main]
     paths:
-      - "main_v021.py"
-      - "main.py"
+      - "source_v022/**"
+      - "prepare_source.py"
       - "requirements.txt"
       - "assets/**"
-      - "build-windows.bat"
       - "README.md"
       - ".github/workflows/build-windows.yml"
 
@@ -30,6 +29,24 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Reconstruir fonte v0.2.2
+        shell: pwsh
+        run: |
+          python prepare_source.py
+          python -m py_compile main.py
+
+      - name: Atualizar main.py no repositorio
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.py
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "Aplica fonte Windows v0.2.2"
+            git push
+          }
+
       - name: Instalar dependencias
         shell: pwsh
         run: |
@@ -45,7 +62,7 @@ jobs:
             --add-data "assets/capa_padrao.png;assets" `
             --add-data "assets/editor_pdf_icon.png;assets" `
             --collect-all PySide6 `
-            main_v021.py
+            main.py
 
       - name: Montar pacote
         shell: pwsh
@@ -54,15 +71,15 @@ jobs:
           Copy-Item "dist/Editor-de-PDF.exe" "pacote/Editor-de-PDF.exe"
           Copy-Item "assets/capa_padrao.png" "pacote/CAPA-PADRAO.png"
           Copy-Item "README.md" "pacote/README.md"
-          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.2.1.zip" -Force
+          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.2.2.zip" -Force
 
-      - name: Publicar diretamente no Release v0.2.1
+      - name: Publicar diretamente no Release v0.2.2
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.2.1"
-          $arquivo = "Editor-de-PDF-Windows-Portable-v0.2.1.zip"
+          $tag = "v0.2.2"
+          $arquivo = "Editor-de-PDF-Windows-Portable-v0.2.2.zip"
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
@@ -70,6 +87,6 @@ jobs:
           }
           else {
             gh release create $tag $arquivo `
-              --title "Editor de PDF v0.2.1" `
-              --notes "Versao Windows Portable v0.2.1 com ferramentas de recorte fora da area de pre-visualizacao e Ctrl+Z para desfazer recorte, remocao de recorte, giro e exclusao. Mantem layout moderno, drag & drop, icone, capa sem corte e publicacao direta em Releases."
+              --title "Editor de PDF v0.2.2" `
+              --notes "Windows Portable v0.2.2: toda a area de pre-visualizacao fica livre para o corte. Selecionar/remover recorte, girar para esquerda/direita e excluir pagina foram movidos para o painel Acoes. Mantido Ctrl+Z, drag & drop, icone, capa sem corte e publicacao direta em Releases."
           }
