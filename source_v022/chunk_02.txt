@@ -1,0 +1,220 @@
+        btn_reset.clicked.connect(self.reset_cover)
+        cover_buttons.addWidget(btn_change)
+        cover_buttons.addWidget(btn_reset)
+        cb_layout.addLayout(cover_buttons)
+        right_layout.addWidget(cover_box)
+        self.refresh_cover_preview()
+
+        quality_box = QFrame()
+        quality_box.setObjectName("settingsCard")
+        q_layout = QVBoxLayout(quality_box)
+        q_layout.setContentsMargins(12, 12, 12, 12)
+        q_label = QLabel("Qualidade")
+        q_label.setObjectName("fieldLabel")
+        q_layout.addWidget(q_label)
+        self.quality = QComboBox()
+        self.quality.addItem("Alta (300 DPI)", 300)
+        self.quality.addItem("Média (220 DPI)", 220)
+        self.quality.addItem("Compacta (160 DPI)", 160)
+        q_layout.addWidget(self.quality)
+        right_layout.addWidget(quality_box)
+
+        format_box = QFrame()
+        format_box.setObjectName("settingsCard")
+        f_layout = QVBoxLayout(format_box)
+        f_layout.setContentsMargins(12, 12, 12, 12)
+        info = QLabel(
+            "PDF inteligente\n\n"
+            "• Capa sempre inteira, sem corte\n"
+            "• Largura padronizada\n"
+            "• Altura automática\n"
+            "• Margem mínima\n"
+            "• Vetor preservado quando possível"
+        )
+        info.setObjectName("info")
+        info.setWordWrap(True)
+        f_layout.addWidget(info)
+        right_layout.addWidget(format_box)
+        right_layout.addStretch(1)
+
+        btn_generate = QPushButton("▣   GERAR PDF")
+        btn_generate.setObjectName("generate")
+        btn_generate.setMinimumHeight(58)
+        btn_generate.clicked.connect(self.generate_pdf)
+        right_layout.addWidget(btn_generate)
+        splitter.addWidget(right)
+        splitter.setSizes([250, 820, 310])
+
+        # Faixa de miniaturas inferior
+        pages_panel = QFrame()
+        pages_panel.setObjectName("pagesPanel")
+        pages_layout = QVBoxLayout(pages_panel)
+        pages_layout.setContentsMargins(12, 10, 12, 10)
+        pages_layout.setSpacing(7)
+
+        pages_head = QHBoxLayout()
+        pages_title = QLabel("PÁGINAS")
+        pages_title.setObjectName("sectionTitle")
+        pages_head.addWidget(pages_title)
+        pages_head.addWidget(QLabel("arraste para reordenar"))
+        pages_head.addStretch(1)
+        self.pages_count = QLabel("0 página(s)")
+        self.pages_count.setObjectName("mutedText")
+        pages_head.addWidget(self.pages_count)
+        pages_layout.addLayout(pages_head)
+
+        self.list = PageListWidget()
+        self.list.setViewMode(QListView.IconMode)
+        self.list.setFlow(QListView.LeftToRight)
+        self.list.setWrapping(False)
+        self.list.setResizeMode(QListView.Adjust)
+        self.list.setMovement(QListView.Snap)
+        self.list.setIconSize(QSize(105, 105))
+        self.list.setGridSize(QSize(150, 132))
+        self.list.setSpacing(6)
+        self.list.setFixedHeight(142)
+        self.list.setDragDropMode(QListWidget.InternalMove)
+        self.list.setDefaultDropAction(Qt.MoveAction)
+        self.list.currentItemChanged.connect(self.on_current_changed)
+        self.list.filesDropped.connect(self.import_dropped_files)
+        pages_layout.addWidget(self.list)
+        workspace_layout.addWidget(pages_panel)
+
+        self.setStatusBar(QStatusBar())
+
+    def _apply_theme(self):
+        self.setStyleSheet("""
+            * { font-family: 'Segoe UI'; font-size: 13px; }
+            QMainWindow, #appRoot { background:#0b1220; color:#eef4ff; }
+            #header { background:#101b2b; border-bottom:1px solid #26384f; }
+            #appTitle { font-size:26px; font-weight:700; color:#f5f8ff; }
+            #appSubtitle, #mutedText { color:#8fa3bd; }
+            #panel, #pagesPanel { background:#111d2c; border:1px solid #263950; border-radius:12px; }
+            #sectionTitle { color:#c7d3e3; font-size:13px; font-weight:700; letter-spacing:1px; }
+            QPushButton { background:#1a2a3e; color:#edf4ff; border:1px solid #314861; border-radius:8px; padding:9px 12px; }
+            QPushButton:hover { background:#233951; border-color:#47709a; }
+            QPushButton:pressed { background:#152639; }
+            #primaryAction, #topPrimary, #generate, #editPrimary { background:#1769d2; border:1px solid #2c82ea; font-weight:700; }
+            #primaryAction:hover, #topPrimary:hover, #generate:hover, #editPrimary:hover { background:#2379e5; }
+            #secondaryAction { text-align:left; padding-left:16px; }
+            #topAction, #topPrimary { min-height:34px; }
+            #dropZone { background:#0e1826; color:#aebed1; border:1px dashed #667b93; border-radius:10px; padding:14px; font-size:14px; }
+            #tipBox { color:#a3b4c8; background:#142235; border:1px solid #28405a; border-radius:8px; padding:10px; }
+            #previewArea { background:#0b1420; border:1px solid #263a51; border-radius:10px; }
+            #editBar { background:#0e1826; border:1px solid #263950; border-radius:9px; }
+            #settingsCard, #cropToolsCard { background:#152235; border:1px solid #2a4058; border-radius:10px; }
+            #coverPreview { background:#0b1420; border:1px solid #263a51; border-radius:7px; }
+            #fieldLabel { color:#c7d3e3; font-weight:600; }
+            #info { color:#9fb1c7; line-height:1.35; }
+            QComboBox { background:#0e1928; color:#eef4ff; border:1px solid #38516d; border-radius:7px; padding:9px; }
+            QComboBox QAbstractItemView { background:#101b2b; color:#eef4ff; selection-background-color:#1769d2; }
+            QCheckBox { color:#eef4ff; spacing:8px; }
+            QListWidget { background:#0d1724; border:1px solid #253a51; border-radius:9px; padding:5px; outline:0; }
+            QListWidget::item { background:#152235; border:1px solid #2a4058; border-radius:8px; padding:5px; margin:2px; }
+            QListWidget::item:hover { border-color:#4c759e; background:#1a2c42; }
+            QListWidget::item:selected { background:#163e70; border:2px solid #2f8cff; color:white; }
+            QSplitter::handle { background:#0b1220; width:7px; }
+            QStatusBar { background:#09101a; color:#90a4bc; border-top:1px solid #1f3146; }
+            QScrollBar:horizontal { height:9px; background:#0d1724; }
+            QScrollBar::handle:horizontal { background:#38516d; border-radius:4px; min-width:30px; }
+            QScrollBar:vertical { width:9px; background:#0d1724; }
+            QScrollBar::handle:vertical { background:#38516d; border-radius:4px; min-height:30px; }
+        """)
+
+    def _setup_shortcuts(self):
+        self.undo_action = QAction("Desfazer", self)
+        self.undo_action.setShortcut(QKeySequence.Undo)
+        self.undo_action.setShortcutContext(Qt.ApplicationShortcut)
+        self.undo_action.triggered.connect(self.undo_last_action)
+        self.addAction(self.undo_action)
+        self._update_undo_ui()
+
+    def _update_undo_ui(self):
+        enabled = bool(self.undo_stack)
+        if hasattr(self, "undo_action"):
+            self.undo_action.setEnabled(enabled)
+        if hasattr(self, "btn_undo"):
+            self.btn_undo.setEnabled(enabled)
+
+    def _page_label(self, page: PageData) -> str:
+        if page.kind == "pdf":
+            return f"{Path(page.path).name} — pág. {page.page_no + 1}"
+        return Path(page.path).name
+
+    def _push_undo(self, description: str):
+        order = []
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            order.append((item.data(Qt.UserRole), item.text()))
+        self.undo_stack.append({
+            "description": description,
+            "pages": copy.deepcopy(self.pages),
+            "order": order,
+            "current_uid": self.current_uid,
+        })
+        if len(self.undo_stack) > 30:
+            self.undo_stack.pop(0)
+        self._update_undo_ui()
+
+    def undo_last_action(self):
+        if not self.undo_stack:
+            return
+        snapshot = self.undo_stack.pop()
+        self.pages = copy.deepcopy(snapshot["pages"])
+
+        self.list.blockSignals(True)
+        self.list.clear()
+        selected_row = -1
+        for row, (uid, label) in enumerate(snapshot["order"]):
+            page = self.pages.get(uid)
+            if not page:
+                continue
+            item = QListWidgetItem(label or self._page_label(page))
+            item.setData(Qt.UserRole, uid)
+            thumb = self.make_thumbnail(page)
+            if thumb:
+                item.setIcon(QIcon(thumb))
+            self.list.addItem(item)
+            if uid == snapshot.get("current_uid"):
+                selected_row = row
+        self.list.blockSignals(False)
+
+        self.crop_mode = False
+        self.preview.set_crop_mode(False)
+        self.btn_crop.setText("⌗  Selecionar corte")
+        if hasattr(self, "pages_count"):
+            self.pages_count.setText(f"{self.list.count()} página(s)")
+
+        if self.list.count():
+            if selected_row < 0 or selected_row >= self.list.count():
+                selected_row = 0
+            self.list.setCurrentRow(selected_row)
+            self.on_current_changed(self.list.currentItem(), None)
+        else:
+            self.current_uid = None
+            self.preview.set_source_pixmap(None)
+            self.page_indicator.setText("Nenhuma página selecionada")
+
+        self._update_undo_ui()
+        self.statusBar().showMessage(f"Desfeito: {snapshot.get('description', 'última ação')}", 4000)
+
+    def page_order(self) -> list[PageData]:
+        ordered = []
+        for i in range(self.list.count()):
+            uid = self.list.item(i).data(Qt.UserRole)
+            if uid in self.pages:
+                ordered.append(self.pages[uid])
+        return ordered
+
+    @staticmethod
+    def _supported_local_paths(event) -> list[str]:
+        if not event.mimeData().hasUrls():
+            return []
+        paths: list[str] = []
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            path = url.toLocalFile()
+            if Path(path).is_file() and Path(path).suffix.lower() in SUPPORTED_DROP_EXTS:
+                paths.append(path)
+        return paths
