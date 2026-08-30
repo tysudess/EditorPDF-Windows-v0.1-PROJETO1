@@ -1,0 +1,28 @@
+                else:
+                    os.system(f'xdg-open "{folder}" >/dev/null 2>&1 &')
+
+        except Exception as exc:
+            try:
+                out.close()
+            except Exception:
+                pass
+            for doc in pdf_cache.values():
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+            QMessageBox.critical(self, APP_NAME, f"Não foi possível gerar o PDF:\n\n{exc}")
+            self.statusBar().showMessage("Falha ao gerar o PDF.", 5000)
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setWindowIcon(QIcon(str(resource_path("assets/editor_pdf_icon.png"))))
+    window = EditorPDF()
+    window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
