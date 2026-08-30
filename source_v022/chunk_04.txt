@@ -1,0 +1,220 @@
+        self.btn_crop.setText("⌗  Selecionar corte")
+        self.refresh_preview()
+        self.refresh_current_thumbnail()
+        self.statusBar().showMessage("Recorte removido.", 3000)
+
+    def rotate_current(self, delta: int):
+        page = self.current_page()
+        if not page:
+            return
+        self._push_undo("giro da página")
+        page.rotation = (page.rotation + delta) % 360
+        if page.crop is not None:
+            page.crop = None
+            self.statusBar().showMessage("Página girada. O recorte anterior foi removido para evitar deformação.", 5000)
+        self.refresh_preview()
+        self.refresh_current_thumbnail()
+
+    def refresh_current_thumbnail(self):
+        item = self.list.currentItem()
+        page = self.current_page()
+        if item and page:
+            thumb = self.make_thumbnail(page)
+            if thumb:
+                item.setIcon(QIcon(thumb))
+
+    def delete_current(self):
+        row = self.list.currentRow()
+        item = self.list.currentItem()
+        if row < 0 or not item:
+            return
+        uid = item.data(Qt.UserRole)
+        self._push_undo("exclusão da página")
+        self.list.takeItem(row)
+        self.pages.pop(uid, None)
+        if hasattr(self, "pages_count"):
+            self.pages_count.setText(f"{self.list.count()} página(s)")
+        if self.list.count():
+            self.list.setCurrentRow(min(row, self.list.count() - 1))
+        else:
+            self.current_uid = None
+            self.preview.set_source_pixmap(None)
+
+    def move_current(self, delta: int):
+        row = self.list.currentRow()
+        if row < 0:
+            return
+        target = row + delta
+        if not (0 <= target < self.list.count()):
+            return
+        item = self.list.takeItem(row)
+        self.list.insertItem(target, item)
+        self.list.setCurrentRow(target)
+
+    def refresh_cover_preview(self):
+        if self.default_cover.exists():
+            pix = QPixmap(str(self.default_cover))
+            if not pix.isNull():
+                self.cover_preview.setPixmap(pix.scaled(170, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                return
+        self.cover_preview.setText("Capa padrão indisponível")
+
+    def choose_cover(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Escolher capa padrão", "", "Imagens (*.png *.jpg *.jpeg *.webp *.bmp)"
+        )
+        if not path:
+            return
+        try:
+            img = Image.open(path)
+            img.verify()
+            target = data_dir() / "capa_padrao_usuario.png"
+            with Image.open(path) as im:
+                im = ImageOps.exif_transpose(im).convert("RGB")
+                im.save(target, "PNG", optimize=True)
+            self.default_cover = target
+            self.config["cover_path"] = str(target)
+            save_config(self.config)
+            self.refresh_cover_preview()
+            self.statusBar().showMessage("Nova capa padrão salva.", 3500)
+        except Exception as exc:
+            QMessageBox.warning(self, APP_NAME, f"Não foi possível usar essa imagem como capa:\n{exc}")
+
+    def reset_cover(self):
+        self.default_cover = resource_path("assets/capa_padrao.png")
+        self.config.pop("cover_path", None)
+        save_config(self.config)
+        self.refresh_cover_preview()
+        self.statusBar().showMessage("Capa padrão original restaurada.", 3500)
+
+    def _pil_for_page(self, page: PageData, dpi: int) -> Image.Image:
+        if page.kind == "image":
+            img = Image.open(page.path)
+            img = ImageOps.exif_transpose(img).convert("RGB")
+        else:
+            doc = fitz.open(page.path)
+            p = doc.load_page(page.page_no)
+            scale = dpi / 72.0
+            pix = p.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            doc.close()
+            img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+
+        if page.rotation:
+            img = img.rotate(-page.rotation, expand=True, resample=Image.Resampling.BICUBIC)
+        if page.crop:
+            x, y, w, h = page.crop
+            left = round(x * img.width)
+            top = round(y * img.height)
+            right = round((x + w) * img.width)
+            bottom = round((y + h) * img.height)
+            left = max(0, min(img.width - 1, left))
+            top = max(0, min(img.height - 1, top))
+            right = max(left + 1, min(img.width, right))
+            bottom = max(top + 1, min(img.height, bottom))
+            img = img.crop((left, top, right, bottom))
+        return img
+
+    @staticmethod
+    def _dynamic_page_rect(content_width: float, content_height: float, margin: float = CONTENT_MARGIN_PT) -> tuple[fitz.Rect, fitz.Rect]:
+        """
+        Cria uma pagina com largura fixa e altura ajustada ao conteudo.
+        O conteudo nunca e cortado nem deformado; sobra apenas a margem minima.
+        """
+        content_width = max(1.0, float(content_width))
+        content_height = max(1.0, float(content_height))
+        inner_w = STANDARD_PAGE_W - (2.0 * margin)
+        scale = inner_w / content_width
+        inner_h = content_height * scale
+        page_h = inner_h + (2.0 * margin)
+        page_rect = fitz.Rect(0, 0, STANDARD_PAGE_W, page_h)
+        inner_rect = fitz.Rect(margin, margin, STANDARD_PAGE_W - margin, page_h - margin)
+        return page_rect, inner_rect
+
+    def _insert_cover_page(self, out: fitz.Document, image_path: Path | str):
+        """Insere a capa inteira, sem recorte, sem deformacao e sem borda branca."""
+        with Image.open(image_path) as raw:
+            img = ImageOps.exif_transpose(raw).convert("RGB")
+            page_w = STANDARD_PAGE_W
+            page_h = page_w * (img.height / max(1, img.width))
+            page_rect = fitz.Rect(0, 0, page_w, page_h)
+            page = out.new_page(width=page_w, height=page_h)
+
+            # PNG e usado para evitar perda adicional de qualidade na capa.
+            buffer = io.BytesIO()
+            img.save(buffer, format="PNG")
+            page.insert_image(page_rect, stream=buffer.getvalue(), keep_proportion=True)
+
+    def generate_pdf(self):
+        ordered = self.page_order()
+        if not ordered and not self.cover_check.isChecked():
+            QMessageBox.information(self, APP_NAME, "Adicione pelo menos uma imagem/PDF ou habilite a capa padrão.")
+            return
+
+        suggested = "RADAR DE NOTICIAS.pdf" if self.cover_check.isChecked() else "documento.pdf"
+        out_path, _ = QFileDialog.getSaveFileName(self, "Gerar PDF", suggested, "PDF (*.pdf)")
+        if not out_path:
+            return
+        if not out_path.lower().endswith(".pdf"):
+            out_path += ".pdf"
+
+        dpi = int(self.quality.currentData())
+        out = fitz.open()
+        pdf_cache: dict[str, fitz.Document] = {}
+
+        try:
+            if self.cover_check.isChecked():
+                if not self.default_cover.exists():
+                    raise RuntimeError("A capa padrão não foi encontrada.")
+                self._insert_cover_page(out, self.default_cover)
+
+            for index, page_data in enumerate(ordered, start=1):
+                self.statusBar().showMessage(f"Gerando página {index} de {len(ordered)}...")
+                QApplication.processEvents()
+
+                # Preserve vector quality for untouched PDF pages.
+                if page_data.kind == "pdf" and page_data.rotation == 0 and page_data.crop is None:
+                    if page_data.path not in pdf_cache:
+                        pdf_cache[page_data.path] = fitz.open(page_data.path)
+                    src = pdf_cache[page_data.path]
+                    src_page = src.load_page(page_data.page_no)
+                    r = src_page.rect
+                    page_rect, content_rect = self._dynamic_page_rect(r.width, r.height)
+                    new_page = out.new_page(width=page_rect.width, height=page_rect.height)
+                    new_page.show_pdf_page(
+                        content_rect, src, page_data.page_no, keep_proportion=True
+                    )
+                    continue
+
+                img = self._pil_for_page(page_data, dpi=dpi)
+                page_rect, content_rect = self._dynamic_page_rect(img.width, img.height)
+                new_page = out.new_page(width=page_rect.width, height=page_rect.height)
+                buffer = io.BytesIO()
+                # Alta qualidade para paginas rasterizadas/editadas.
+                img.save(buffer, format="JPEG", quality=97, subsampling=0, optimize=True)
+                new_page.insert_image(
+                    content_rect, stream=buffer.getvalue(), keep_proportion=True
+                )
+
+            if out.page_count == 0:
+                raise RuntimeError("Nenhuma página foi gerada.")
+
+            out.save(out_path, garbage=4, deflate=True, clean=True)
+            out.close()
+            for doc in pdf_cache.values():
+                doc.close()
+
+            self.statusBar().showMessage("PDF gerado com sucesso.", 5000)
+            box = QMessageBox(self)
+            box.setWindowTitle(APP_NAME)
+            box.setIcon(QMessageBox.Information)
+            box.setText("PDF gerado com sucesso!")
+            box.setInformativeText(out_path)
+            open_btn = box.addButton("Abrir pasta", QMessageBox.ActionRole)
+            box.addButton("OK", QMessageBox.AcceptRole)
+            box.exec()
+            if box.clickedButton() == open_btn:
+                folder = str(Path(out_path).resolve().parent)
+                if sys.platform.startswith("win"):
+                    os.startfile(folder)
+                elif sys.platform == "darwin":
+                    os.system(f'open "{folder}"')
