@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ========================================
-echo   EDITOR DE PDF - BUILD WINDOWS
+echo   EDITOR DE PDF v0.2.1 - BUILD WINDOWS
 echo ========================================
 
 python -m pip install --upgrade pip
@@ -18,7 +18,7 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --add-data "assets\capa_padrao.png;assets" ^
   --add-data "assets\editor_pdf_icon.png;assets" ^
   --collect-all PySide6 ^
-  main.py
+  main_v021.py
 
 if errorlevel 1 (
   echo.
