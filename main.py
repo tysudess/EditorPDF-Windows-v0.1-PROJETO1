@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Editor de PDF"
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.2.3"
 STANDARD_PAGE_W = 595.276  # largura A4 em pontos; todas as paginas internas usam esta largura
 CONTENT_MARGIN_PT = 2.0    # margem interna minima (aprox. 0,7 mm)
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
@@ -94,7 +94,7 @@ class CropLabel(QLabel):
     def __init__(self):
         super().__init__()
         self.setAlignment(Qt.AlignCenter)
-        self.setMinimumSize(420, 520)
+        self.setMinimumSize(260, 260)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setStyleSheet("background:#151922; border:1px solid #2d3544; border-radius:8px;")
         self._source_pixmap: Optional[QPixmap] = None
@@ -103,6 +103,12 @@ class CropLabel(QLabel):
         self._dragging = False
         self._start = None
         self._rubber = QRect()
+
+    def sizeHint(self):
+        return QSize(640, 480)
+
+    def minimumSizeHint(self):
+        return QSize(260, 260)
 
     def set_crop_mode(self, enabled: bool):
         self._crop_mode = enabled
@@ -126,7 +132,7 @@ class CropLabel(QLabel):
             self.clear()
             self._display_rect = QRect()
             return
-        available = self.contentsRect().adjusted(14, 14, -14, -14)
+        available = self.contentsRect().adjusted(18, 18, -18, -18)
         scaled = self._source_pixmap.scaled(
             available.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
@@ -304,22 +310,23 @@ class EditorPDF(QMainWindow):
 
         workspace = QWidget()
         workspace_layout = QVBoxLayout(workspace)
-        workspace_layout.setContentsMargins(18, 16, 18, 12)
-        workspace_layout.setSpacing(12)
+        workspace_layout.setContentsMargins(14, 12, 14, 10)
+        workspace_layout.setSpacing(10)
         outer.addWidget(workspace, 1)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(6)
         workspace_layout.addWidget(splitter, 1)
 
         # AÇÕES — coluna esquerda
         left = QFrame()
         left.setObjectName("panel")
-        left.setMinimumWidth(235)
-        left.setMaximumWidth(290)
+        left.setMinimumWidth(280)
+        left.setMaximumWidth(330)
         left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(16, 16, 16, 16)
-        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(14, 14, 14, 14)
+        left_layout.setSpacing(8)
 
         left_title = QLabel("AÇÕES")
         left_title.setObjectName("sectionTitle")
@@ -327,19 +334,19 @@ class EditorPDF(QMainWindow):
 
         btn_img = QPushButton("▧   Adicionar imagem")
         btn_img.setObjectName("primaryAction")
-        btn_img.setMinimumHeight(52)
+        btn_img.setMinimumHeight(44)
         btn_img.clicked.connect(self.add_images)
         left_layout.addWidget(btn_img)
 
         btn_pdf = QPushButton("▣   Adicionar PDF")
         btn_pdf.setObjectName("secondaryAction")
-        btn_pdf.setMinimumHeight(52)
+        btn_pdf.setMinimumHeight(44)
         btn_pdf.clicked.connect(self.add_pdf)
         left_layout.addWidget(btn_pdf)
 
         btn_cover = QPushButton("▤   Alterar capa padrão")
         btn_cover.setObjectName("secondaryAction")
-        btn_cover.setMinimumHeight(52)
+        btn_cover.setMinimumHeight(44)
         btn_cover.clicked.connect(self.choose_cover)
         left_layout.addWidget(btn_cover)
 
@@ -347,8 +354,8 @@ class EditorPDF(QMainWindow):
         edit_tools = QFrame()
         edit_tools.setObjectName("cropToolsCard")
         tools_layout = QVBoxLayout(edit_tools)
-        tools_layout.setContentsMargins(10, 10, 10, 10)
-        tools_layout.setSpacing(7)
+        tools_layout.setContentsMargins(9, 9, 9, 9)
+        tools_layout.setSpacing(6)
         tools_title = QLabel("EDIÇÃO DA PÁGINA")
         tools_title.setObjectName("fieldLabel")
         tools_layout.addWidget(tools_title)
@@ -366,20 +373,21 @@ class EditorPDF(QMainWindow):
         btn_del.clicked.connect(self.delete_current)
 
         for b in (self.btn_crop, self.btn_clear_crop, btn_left, btn_right, btn_del):
-            b.setMinimumHeight(38)
+            b.setMinimumHeight(34)
             tools_layout.addWidget(b)
         left_layout.addWidget(edit_tools)
 
         drop = QLabel("☁\n\nArraste imagens\nou PDFs aqui\n\nJPG • PNG • WebP • PDF")
         drop.setObjectName("dropZone")
         drop.setAlignment(Qt.AlignCenter)
-        drop.setMinimumHeight(130)
+        drop.setMinimumHeight(92)
         drop.setWordWrap(True)
         left_layout.addWidget(drop)
 
         tip = QLabel("ⓘ  Você também pode reorganizar as páginas arrastando as miniaturas na faixa inferior.")
         tip.setObjectName("tipBox")
         tip.setWordWrap(True)
+        tip.setMaximumHeight(68)
         left_layout.addWidget(tip)
         left_layout.addStretch(1)
         splitter.addWidget(left)
@@ -411,8 +419,8 @@ class EditorPDF(QMainWindow):
         # CONFIGURAÇÕES — coluna direita
         right = QFrame()
         right.setObjectName("panel")
-        right.setMinimumWidth(280)
-        right.setMaximumWidth(340)
+        right.setMinimumWidth(295)
+        right.setMaximumWidth(335)
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(16, 16, 16, 16)
         right_layout.setSpacing(10)
@@ -430,8 +438,8 @@ class EditorPDF(QMainWindow):
         cb_layout.addWidget(self.cover_check)
         self.cover_preview = QLabel()
         self.cover_preview.setAlignment(Qt.AlignCenter)
-        self.cover_preview.setMinimumHeight(145)
-        self.cover_preview.setMaximumHeight(175)
+        self.cover_preview.setMinimumHeight(105)
+        self.cover_preview.setMaximumHeight(125)
         self.cover_preview.setObjectName("coverPreview")
         cb_layout.addWidget(self.cover_preview)
         cover_buttons = QHBoxLayout()
@@ -473,17 +481,18 @@ class EditorPDF(QMainWindow):
         )
         info.setObjectName("info")
         info.setWordWrap(True)
+        info.setMaximumHeight(130)
         f_layout.addWidget(info)
         right_layout.addWidget(format_box)
         right_layout.addStretch(1)
 
         btn_generate = QPushButton("▣   GERAR PDF")
         btn_generate.setObjectName("generate")
-        btn_generate.setMinimumHeight(58)
+        btn_generate.setMinimumHeight(52)
         btn_generate.clicked.connect(self.generate_pdf)
         right_layout.addWidget(btn_generate)
         splitter.addWidget(right)
-        splitter.setSizes([250, 820, 310])
+        splitter.setSizes([300, 900, 315])
 
         # Faixa de miniaturas inferior
         pages_panel = QFrame()
@@ -509,10 +518,10 @@ class EditorPDF(QMainWindow):
         self.list.setWrapping(False)
         self.list.setResizeMode(QListView.Adjust)
         self.list.setMovement(QListView.Snap)
-        self.list.setIconSize(QSize(105, 105))
-        self.list.setGridSize(QSize(150, 132))
-        self.list.setSpacing(6)
-        self.list.setFixedHeight(142)
+        self.list.setIconSize(QSize(82, 82))
+        self.list.setGridSize(QSize(132, 104))
+        self.list.setSpacing(5)
+        self.list.setFixedHeight(112)
         self.list.setDragDropMode(QListWidget.InternalMove)
         self.list.setDefaultDropAction(Qt.MoveAction)
         self.list.currentItemChanged.connect(self.on_current_changed)
@@ -527,7 +536,7 @@ class EditorPDF(QMainWindow):
             * { font-family: 'Segoe UI'; font-size: 13px; }
             QMainWindow, #appRoot { background:#0b1220; color:#eef4ff; }
             #header { background:#101b2b; border-bottom:1px solid #26384f; }
-            #appTitle { font-size:26px; font-weight:700; color:#f5f8ff; }
+            #appTitle { font-size:24px; font-weight:700; color:#f5f8ff; }
             #appSubtitle, #mutedText { color:#8fa3bd; }
             #panel, #pagesPanel { background:#111d2c; border:1px solid #263950; border-radius:12px; }
             #sectionTitle { color:#c7d3e3; font-size:13px; font-weight:700; letter-spacing:1px; }
@@ -538,8 +547,8 @@ class EditorPDF(QMainWindow):
             #primaryAction:hover, #topPrimary:hover, #generate:hover, #editPrimary:hover { background:#2379e5; }
             #secondaryAction { text-align:left; padding-left:16px; }
             #topAction, #topPrimary { min-height:34px; }
-            #dropZone { background:#0e1826; color:#aebed1; border:1px dashed #667b93; border-radius:10px; padding:14px; font-size:14px; }
-            #tipBox { color:#a3b4c8; background:#142235; border:1px solid #28405a; border-radius:8px; padding:10px; }
+            #dropZone { background:#0e1826; color:#aebed1; border:1px dashed #667b93; border-radius:10px; padding:10px; font-size:13px; }
+            #tipBox { color:#a3b4c8; background:#142235; border:1px solid #28405a; border-radius:8px; padding:8px; font-size:12px; }
             #previewArea { background:#0b1420; border:1px solid #263a51; border-radius:10px; }
             #editBar { background:#0e1826; border:1px solid #263950; border-radius:9px; }
             #settingsCard, #cropToolsCard { background:#152235; border:1px solid #2a4058; border-radius:10px; }
