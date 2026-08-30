@@ -5,8 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "source_v022/**"
-      - "prepare_source.py"
+      - "patch_v023.py"
       - "requirements.txt"
       - "assets/**"
       - "README.md"
@@ -29,10 +28,10 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Reconstruir fonte v0.2.2
+      - name: Aplicar ajuste fino v0.2.3
         shell: pwsh
         run: |
-          python prepare_source.py
+          python patch_v023.py
           python -m py_compile main.py
 
       - name: Atualizar main.py no repositorio
@@ -43,7 +42,7 @@ jobs:
           git add main.py
           git diff --cached --quiet
           if ($LASTEXITCODE -ne 0) {
-            git commit -m "Aplica fonte Windows v0.2.2"
+            git commit -m "Aplica ajuste fino do layout Windows v0.2.3"
             git push
           }
 
@@ -71,15 +70,15 @@ jobs:
           Copy-Item "dist/Editor-de-PDF.exe" "pacote/Editor-de-PDF.exe"
           Copy-Item "assets/capa_padrao.png" "pacote/CAPA-PADRAO.png"
           Copy-Item "README.md" "pacote/README.md"
-          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.2.2.zip" -Force
+          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.2.3.zip" -Force
 
-      - name: Publicar diretamente no Release v0.2.2
+      - name: Publicar diretamente no Release v0.2.3
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.2.2"
-          $arquivo = "Editor-de-PDF-Windows-Portable-v0.2.2.zip"
+          $tag = "v0.2.3"
+          $arquivo = "Editor-de-PDF-Windows-Portable-v0.2.3.zip"
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
@@ -87,6 +86,6 @@ jobs:
           }
           else {
             gh release create $tag $arquivo `
-              --title "Editor de PDF v0.2.2" `
-              --notes "Windows Portable v0.2.2: toda a area de pre-visualizacao fica livre para o corte. Selecionar/remover recorte, girar para esquerda/direita e excluir pagina foram movidos para o painel Acoes. Mantido Ctrl+Z, drag & drop, icone, capa sem corte e publicacao direta em Releases."
+              --title "Editor de PDF v0.2.3" `
+              --notes "Windows Portable v0.2.3 com ajuste fino geral de layout: pre-visualizacao passa a encaixar a pagina inteira com melhor aproveitamento vertical; coluna Acoes fica mais larga e compacta; controles de edicao ficam legiveis; configuracoes e faixa de miniaturas foram refinadas. Mantidos Ctrl+Z, drag & drop, capa sem corte, icone moderno e publicacao direta em Releases."
           }
