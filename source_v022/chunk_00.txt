@@ -1,0 +1,220 @@
+import copy
+import io
+import json
+import os
+import shutil
+import sys
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Tuple
+
+import fitz  # PyMuPDF
+from PIL import Image, ImageOps
+from PySide6.QtCore import Qt, QRect, QRectF, QSize, Signal
+from PySide6.QtGui import QAction, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QTransform
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QListView,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QStatusBar,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
+
+APP_NAME = "Editor de PDF"
+APP_VERSION = "0.2.2"
+STANDARD_PAGE_W = 595.276  # largura A4 em pontos; todas as paginas internas usam esta largura
+CONTENT_MARGIN_PT = 2.0    # margem interna minima (aprox. 0,7 mm)
+SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+SUPPORTED_DROP_EXTS = SUPPORTED_IMAGE_EXTS | {".pdf"}
+
+
+def base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def resource_path(relative: str) -> Path:
+    bundle = Path(getattr(sys, "_MEIPASS", base_dir()))
+    return bundle / relative
+
+
+def data_dir() -> Path:
+    p = base_dir() / "data"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def config_path() -> Path:
+    return data_dir() / "config.json"
+
+
+def load_config() -> dict:
+    try:
+        return json.loads(config_path().read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_config(data: dict) -> None:
+    try:
+        config_path().write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+@dataclass
+class PageData:
+    uid: str
+    kind: str  # image | pdf
+    path: str
+    page_no: int = 0
+    rotation: int = 0
+    crop: Optional[Tuple[float, float, float, float]] = None
+
+
+class CropLabel(QLabel):
+    cropSelected = Signal(float, float, float, float)
+
+    def __init__(self):
+        super().__init__()
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumSize(420, 520)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setStyleSheet("background:#151922; border:1px solid #2d3544; border-radius:8px;")
+        self._source_pixmap: Optional[QPixmap] = None
+        self._display_rect = QRect()
+        self._crop_mode = False
+        self._dragging = False
+        self._start = None
+        self._rubber = QRect()
+
+    def set_crop_mode(self, enabled: bool):
+        self._crop_mode = enabled
+        self.setCursor(Qt.CrossCursor if enabled else Qt.ArrowCursor)
+        if not enabled:
+            self._dragging = False
+            self._rubber = QRect()
+            self.update()
+
+    def set_source_pixmap(self, pixmap: Optional[QPixmap]):
+        self._source_pixmap = pixmap
+        self._rubber = QRect()
+        self.update_scaled()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_scaled()
+
+    def update_scaled(self):
+        if not self._source_pixmap or self._source_pixmap.isNull():
+            self.clear()
+            self._display_rect = QRect()
+            return
+        available = self.contentsRect().adjusted(14, 14, -14, -14)
+        scaled = self._source_pixmap.scaled(
+            available.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        super().setPixmap(scaled)
+        x = available.x() + (available.width() - scaled.width()) // 2
+        y = available.y() + (available.height() - scaled.height()) // 2
+        self._display_rect = QRect(x, y, scaled.width(), scaled.height())
+        self.update()
+
+    def mousePressEvent(self, event):
+        if self._crop_mode and event.button() == Qt.LeftButton and self._display_rect.contains(event.position().toPoint()):
+            self._dragging = True
+            self._start = event.position().toPoint()
+            self._rubber = QRect(self._start, self._start)
+            self.update()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._crop_mode and self._dragging:
+            p = event.position().toPoint()
+            p.setX(max(self._display_rect.left(), min(p.x(), self._display_rect.right())))
+            p.setY(max(self._display_rect.top(), min(p.y(), self._display_rect.bottom())))
+            self._rubber = QRect(self._start, p).normalized()
+            self.update()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._crop_mode and self._dragging and event.button() == Qt.LeftButton:
+            self._dragging = False
+            r = self._rubber.intersected(self._display_rect)
+            if r.width() >= 20 and r.height() >= 20 and self._display_rect.width() > 0 and self._display_rect.height() > 0:
+                x = (r.left() - self._display_rect.left()) / self._display_rect.width()
+                y = (r.top() - self._display_rect.top()) / self._display_rect.height()
+                w = r.width() / self._display_rect.width()
+                h = r.height() / self._display_rect.height()
+                self.cropSelected.emit(x, y, w, h)
+            self._rubber = QRect()
+            self.update()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._crop_mode and not self._rubber.isNull():
+            painter = QPainter(self)
+            pen = QPen(Qt.white, 2, Qt.DashLine)
+            painter.setPen(pen)
+            painter.drawRect(self._rubber)
+
+
+class PageListWidget(QListWidget):
+    """Lista que mantém a reordenação interna e também aceita arquivos do Explorer."""
+
+    filesDropped = Signal(list)
+
+    @staticmethod
+    def _local_supported_paths(event) -> list[str]:
+        if not event.mimeData().hasUrls():
+            return []
+        paths: list[str] = []
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            path = url.toLocalFile()
+            if Path(path).is_file() and Path(path).suffix.lower() in SUPPORTED_DROP_EXTS:
+                paths.append(path)
+        return paths
+
+    def dragEnterEvent(self, event):
+        if self._local_supported_paths(event):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if self._local_supported_paths(event):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        paths = self._local_supported_paths(event)
+        if paths:
+            self.filesDropped.emit(paths)
+            event.acceptProposedAction()
+            return
+        # Continua permitindo arrastar as miniaturas para reorganizar páginas.
+        super().dropEvent(event)
+
