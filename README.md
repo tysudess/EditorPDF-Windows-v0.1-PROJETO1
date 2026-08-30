@@ -1,20 +1,28 @@
-# Editor de PDF — Windows Portable v0.2.0
+# Editor de PDF — Windows Portable v0.2.1
 
-Nova interface moderna e acessível baseada no layout aprovado para o projeto.
+Interface moderna e acessível baseada no layout aprovado para o projeto.
 
-## Destaques
-- Tema escuro moderno, painéis bem separados e botões maiores.
-- Pré-visualização central ampliada.
-- Faixa horizontal de miniaturas para reordenar páginas.
-- Arrastar e soltar imagens e PDFs diretamente do Explorador.
-- Importação de imagens e PDFs, giro, recorte e exclusão.
+## Novidades v0.2.1
+- **Selecionar corte** e **Remover recorte** ficam fora da área de pré-visualização, em um painel próprio na coluna **Ações**.
+- A imagem fica livre para visualizar e marcar a área de corte.
+- Novo botão **Desfazer Ctrl+Z** no cabeçalho.
+- Atalho global **Ctrl+Z**.
+- O desfazer cobre: aplicar recorte, remover recorte, girar página e excluir página.
+- Histórico de até 30 ações.
+
+## Mantido
+- Tema escuro moderno.
+- Drag & drop de imagens e PDFs.
+- Reordenação de páginas pelas miniaturas.
 - Capa padrão opcional, sempre inteira e sem corte.
 - Páginas internas com largura padronizada e altura automática.
 - Qualidade Alta / Média / Compacta.
-- Ícone moderno aplicado ao aplicativo e ao executável.
-- Build manual pelo GitHub Actions e publicação direta em Releases, sem Artifacts.
+- Ícone moderno no aplicativo e no executável.
+- Publicação direta em GitHub Releases, sem Actions Artifacts.
 
-## Build manual no GitHub
-Actions → Build Editor de PDF - Windows → Run workflow.
+## Build
+O workflow é acionado automaticamente quando a versão é atualizada na branch `main` e também pode ser executado manualmente em:
 
-O release gerado será `v0.2.0`.
+**Actions → Build Editor de PDF - Windows → Run workflow**
+
+O Release desta versão é `v0.2.1`.
