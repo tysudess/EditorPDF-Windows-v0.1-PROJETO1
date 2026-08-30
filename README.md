@@ -1,19 +1,19 @@
-# Editor de PDF — Windows Portable v0.2.1
+# Editor de PDF — Windows Portable v0.2.2
 
-Interface moderna e acessível baseada no layout aprovado para o projeto.
+Interface moderna e acessível do Editor de PDF para Windows.
 
-## Novidades v0.2.1
-- **Selecionar corte** e **Remover recorte** ficam fora da área de pré-visualização, em um painel próprio na coluna **Ações**.
-- A imagem fica livre para visualizar e marcar a área de corte.
-- Novo botão **Desfazer Ctrl+Z** no cabeçalho.
-- Atalho global **Ctrl+Z**.
-- O desfazer cobre: aplicar recorte, remover recorte, girar página e excluir página.
+## Novidades v0.2.2
+- Toda a área de **pré-visualização fica livre para o recorte**.
+- **Selecionar corte**, **Remover recorte**, **Girar à esquerda**, **Girar à direita** e **Excluir página** ficam fora da imagem, no painel **Ações**.
+- Os botões não cobrem nem reduzem mais a área útil de seleção.
+- Mantido o botão **Desfazer Ctrl+Z** no cabeçalho e o atalho global **Ctrl+Z**.
+- O desfazer cobre recorte, remoção de recorte, giro e exclusão.
 - Histórico de até 30 ações.
 
 ## Mantido
 - Tema escuro moderno.
 - Drag & drop de imagens e PDFs.
-- Reordenação de páginas pelas miniaturas.
+- Reordenação pelas miniaturas.
 - Capa padrão opcional, sempre inteira e sem corte.
 - Páginas internas com largura padronizada e altura automática.
 - Qualidade Alta / Média / Compacta.
@@ -21,8 +21,8 @@ Interface moderna e acessível baseada no layout aprovado para o projeto.
 - Publicação direta em GitHub Releases, sem Actions Artifacts.
 
 ## Build
-O workflow é acionado automaticamente quando a versão é atualizada na branch `main` e também pode ser executado manualmente em:
+O workflow pode ser executado manualmente e também gera automaticamente a Release quando a versão é publicada na branch `main`.
 
 **Actions → Build Editor de PDF - Windows → Run workflow**
 
-O Release desta versão é `v0.2.1`.
+Release: `v0.2.2`.
