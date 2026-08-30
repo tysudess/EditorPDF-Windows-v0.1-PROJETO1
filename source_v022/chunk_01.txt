@@ -1,0 +1,220 @@
+
+class EditorPDF(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(f"{APP_NAME}  v{APP_VERSION}")
+        icon_path = resource_path("assets/editor_pdf_icon.ico")
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+        self.resize(1480, 900)
+        self.setMinimumSize(1120, 720)
+        self.setAcceptDrops(True)
+
+        self.pages: dict[str, PageData] = {}
+        self.current_uid: Optional[str] = None
+        self.crop_mode = False
+        self.undo_stack: list[dict] = []
+        self.config = load_config()
+
+        self.default_cover = self._resolve_cover_path()
+
+        self._build_ui()
+        self._apply_theme()
+        self._setup_shortcuts()
+        self.statusBar().showMessage("Pronto")
+
+    def _resolve_cover_path(self) -> Path:
+        configured = self.config.get("cover_path")
+        if configured and Path(configured).exists():
+            return Path(configured)
+        return resource_path("assets/capa_padrao.png")
+
+    def _build_ui(self):
+        root = QWidget()
+        root.setObjectName("appRoot")
+        self.setCentralWidget(root)
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Cabeçalho moderno
+        header = QFrame()
+        header.setObjectName("header")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(22, 14, 22, 14)
+        header_layout.setSpacing(12)
+
+        logo = QLabel()
+        icon_png = resource_path("assets/editor_pdf_icon.png")
+        if icon_png.exists():
+            logo.setPixmap(QPixmap(str(icon_png)).scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        logo.setFixedSize(52, 52)
+        header_layout.addWidget(logo)
+
+        title_box = QVBoxLayout()
+        title_box.setSpacing(0)
+        title = QLabel("Editor de PDF")
+        title.setObjectName("appTitle")
+        subtitle = QLabel("Organize, edite e exporte documentos com rapidez")
+        subtitle.setObjectName("appSubtitle")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        header_layout.addLayout(title_box)
+        header_layout.addStretch(1)
+
+        self.btn_undo = QPushButton("↶  Desfazer  Ctrl+Z")
+        self.btn_undo.setObjectName("topAction")
+        self.btn_undo.setEnabled(False)
+        self.btn_undo.clicked.connect(self.undo_last_action)
+
+        btn_top_img = QPushButton("＋  Imagem")
+        btn_top_img.setObjectName("topAction")
+        btn_top_img.clicked.connect(self.add_images)
+        btn_top_pdf = QPushButton("▣  PDF")
+        btn_top_pdf.setObjectName("topAction")
+        btn_top_pdf.clicked.connect(self.add_pdf)
+        btn_top_export = QPushButton("Exportar PDF")
+        btn_top_export.setObjectName("topPrimary")
+        btn_top_export.clicked.connect(self.generate_pdf)
+        header_layout.addWidget(self.btn_undo)
+        header_layout.addWidget(btn_top_img)
+        header_layout.addWidget(btn_top_pdf)
+        header_layout.addWidget(btn_top_export)
+        outer.addWidget(header)
+
+        workspace = QWidget()
+        workspace_layout = QVBoxLayout(workspace)
+        workspace_layout.setContentsMargins(18, 16, 18, 12)
+        workspace_layout.setSpacing(12)
+        outer.addWidget(workspace, 1)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        workspace_layout.addWidget(splitter, 1)
+
+        # AÇÕES — coluna esquerda
+        left = QFrame()
+        left.setObjectName("panel")
+        left.setMinimumWidth(235)
+        left.setMaximumWidth(290)
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(16, 16, 16, 16)
+        left_layout.setSpacing(10)
+
+        left_title = QLabel("AÇÕES")
+        left_title.setObjectName("sectionTitle")
+        left_layout.addWidget(left_title)
+
+        btn_img = QPushButton("▧   Adicionar imagem")
+        btn_img.setObjectName("primaryAction")
+        btn_img.setMinimumHeight(52)
+        btn_img.clicked.connect(self.add_images)
+        left_layout.addWidget(btn_img)
+
+        btn_pdf = QPushButton("▣   Adicionar PDF")
+        btn_pdf.setObjectName("secondaryAction")
+        btn_pdf.setMinimumHeight(52)
+        btn_pdf.clicked.connect(self.add_pdf)
+        left_layout.addWidget(btn_pdf)
+
+        btn_cover = QPushButton("▤   Alterar capa padrão")
+        btn_cover.setObjectName("secondaryAction")
+        btn_cover.setMinimumHeight(52)
+        btn_cover.clicked.connect(self.choose_cover)
+        left_layout.addWidget(btn_cover)
+
+        # Todas as ferramentas de edição ficam FORA da área de pré-visualização.
+        edit_tools = QFrame()
+        edit_tools.setObjectName("cropToolsCard")
+        tools_layout = QVBoxLayout(edit_tools)
+        tools_layout.setContentsMargins(10, 10, 10, 10)
+        tools_layout.setSpacing(7)
+        tools_title = QLabel("EDIÇÃO DA PÁGINA")
+        tools_title.setObjectName("fieldLabel")
+        tools_layout.addWidget(tools_title)
+
+        self.btn_crop = QPushButton("⌗  Selecionar corte")
+        self.btn_crop.setObjectName("editPrimary")
+        self.btn_crop.clicked.connect(self.toggle_crop)
+        self.btn_clear_crop = QPushButton("Remover recorte")
+        self.btn_clear_crop.clicked.connect(self.clear_crop)
+        btn_left = QPushButton("↶  Girar à esquerda")
+        btn_left.clicked.connect(lambda: self.rotate_current(-90))
+        btn_right = QPushButton("↷  Girar à direita")
+        btn_right.clicked.connect(lambda: self.rotate_current(90))
+        btn_del = QPushButton("⌫  Excluir página")
+        btn_del.clicked.connect(self.delete_current)
+
+        for b in (self.btn_crop, self.btn_clear_crop, btn_left, btn_right, btn_del):
+            b.setMinimumHeight(38)
+            tools_layout.addWidget(b)
+        left_layout.addWidget(edit_tools)
+
+        drop = QLabel("☁\n\nArraste imagens\nou PDFs aqui\n\nJPG • PNG • WebP • PDF")
+        drop.setObjectName("dropZone")
+        drop.setAlignment(Qt.AlignCenter)
+        drop.setMinimumHeight(130)
+        drop.setWordWrap(True)
+        left_layout.addWidget(drop)
+
+        tip = QLabel("ⓘ  Você também pode reorganizar as páginas arrastando as miniaturas na faixa inferior.")
+        tip.setObjectName("tipBox")
+        tip.setWordWrap(True)
+        left_layout.addWidget(tip)
+        left_layout.addStretch(1)
+        splitter.addWidget(left)
+
+        # PRÉ-VISUALIZAÇÃO — centro
+        center = QFrame()
+        center.setObjectName("panel")
+        center_layout = QVBoxLayout(center)
+        center_layout.setContentsMargins(14, 14, 14, 14)
+        center_layout.setSpacing(10)
+
+        center_head = QHBoxLayout()
+        preview_title = QLabel("PRÉ-VISUALIZAÇÃO")
+        preview_title.setObjectName("sectionTitle")
+        center_head.addWidget(preview_title)
+        center_head.addStretch(1)
+        self.page_indicator = QLabel("Nenhuma página selecionada")
+        self.page_indicator.setObjectName("mutedText")
+        center_head.addWidget(self.page_indicator)
+        center_layout.addLayout(center_head)
+
+        self.preview = CropLabel()
+        self.preview.setObjectName("previewArea")
+        self.preview.cropSelected.connect(self.apply_crop)
+        center_layout.addWidget(self.preview, 1)
+
+        splitter.addWidget(center)
+
+        # CONFIGURAÇÕES — coluna direita
+        right = QFrame()
+        right.setObjectName("panel")
+        right.setMinimumWidth(280)
+        right.setMaximumWidth(340)
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(16, 16, 16, 16)
+        right_layout.setSpacing(10)
+
+        right_title = QLabel("CONFIGURAÇÕES")
+        right_title.setObjectName("sectionTitle")
+        right_layout.addWidget(right_title)
+
+        cover_box = QFrame()
+        cover_box.setObjectName("settingsCard")
+        cb_layout = QVBoxLayout(cover_box)
+        cb_layout.setContentsMargins(12, 12, 12, 12)
+        self.cover_check = QCheckBox("Incluir capa padrão")
+        self.cover_check.setChecked(True)
+        cb_layout.addWidget(self.cover_check)
+        self.cover_preview = QLabel()
+        self.cover_preview.setAlignment(Qt.AlignCenter)
+        self.cover_preview.setMinimumHeight(145)
+        self.cover_preview.setMaximumHeight(175)
+        self.cover_preview.setObjectName("coverPreview")
+        cb_layout.addWidget(self.cover_preview)
+        cover_buttons = QHBoxLayout()
+        btn_change = QPushButton("Trocar capa")
+        btn_change.clicked.connect(self.choose_cover)
+        btn_reset = QPushButton("Restaurar")
