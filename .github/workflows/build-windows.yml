@@ -5,10 +5,9 @@ on:
   push:
     branches: [main]
     paths:
-      - "patch_v030.py"
+      - "patch_v031.py"
       - "requirements.txt"
       - "assets/**"
-      - "README.md"
       - ".github/workflows/build-windows.yml"
 
 permissions:
@@ -28,21 +27,21 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Aplicar novo layout v0.3.0
+      - name: Aplicar layout aprovado v0.3.1
         shell: pwsh
         run: |
-          python patch_v030.py
+          python patch_v031.py
           python -m py_compile main.py
 
-      - name: Atualizar main.py no repositorio
+      - name: Atualizar fontes no repositorio
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add main.py
+          git add main.py README.md
           git diff --cached --quiet
           if ($LASTEXITCODE -ne 0) {
-            git commit -m "Aplica novo layout Windows v0.3.0"
+            git commit -m "Aplica layout aprovado Windows v0.3.1"
             git push
           }
 
@@ -70,15 +69,15 @@ jobs:
           Copy-Item "dist/Editor-de-PDF.exe" "pacote/Editor-de-PDF.exe"
           Copy-Item "assets/capa_padrao.png" "pacote/CAPA-PADRAO.png"
           Copy-Item "README.md" "pacote/README.md"
-          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.3.0.zip" -Force
+          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.3.1.zip" -Force
 
-      - name: Publicar diretamente no Release v0.3.0
+      - name: Publicar diretamente no Release v0.3.1
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.3.0"
-          $arquivo = "Editor-de-PDF-Windows-Portable-v0.3.0.zip"
+          $tag = "v0.3.1"
+          $arquivo = "Editor-de-PDF-Windows-Portable-v0.3.1.zip"
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
@@ -86,6 +85,6 @@ jobs:
           }
           else {
             gh release create $tag $arquivo `
-              --title "Editor de PDF v0.3.0" `
-              --notes "Windows Portable v0.3.0 com novo layout moderno aprovado: ferramentas de edicao em botoes quadrados com icones, controles de zoom e Ajustar, preview ampliada, paineis refinados, faixa de paginas modernizada, Ctrl+Z, drag & drop e capa sem corte. Publicacao direta em Releases."
+              --title "Editor de PDF v0.3.1" `
+              --notes "Windows Portable v0.3.1 com layout reproduzido conforme a previa aprovada: bloco de dica removido, PAGINAS alinhado com a pre-visualizacao, coluna esquerda ampliada e ferramentas de edicao refeitas em cards quadrados com icones vetoriais maiores e sem sobreposicao. Mantidos zoom, Ajustar, Ctrl+Z, drag & drop e capa sem corte."
           }
