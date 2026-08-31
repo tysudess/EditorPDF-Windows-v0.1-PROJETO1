@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "patch_v023.py"
+      - "patch_v030.py"
       - "requirements.txt"
       - "assets/**"
       - "README.md"
@@ -28,10 +28,10 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Aplicar ajuste fino v0.2.3
+      - name: Aplicar novo layout v0.3.0
         shell: pwsh
         run: |
-          python patch_v023.py
+          python patch_v030.py
           python -m py_compile main.py
 
       - name: Atualizar main.py no repositorio
@@ -42,7 +42,7 @@ jobs:
           git add main.py
           git diff --cached --quiet
           if ($LASTEXITCODE -ne 0) {
-            git commit -m "Aplica ajuste fino do layout Windows v0.2.3"
+            git commit -m "Aplica novo layout Windows v0.3.0"
             git push
           }
 
@@ -70,15 +70,15 @@ jobs:
           Copy-Item "dist/Editor-de-PDF.exe" "pacote/Editor-de-PDF.exe"
           Copy-Item "assets/capa_padrao.png" "pacote/CAPA-PADRAO.png"
           Copy-Item "README.md" "pacote/README.md"
-          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.2.3.zip" -Force
+          Compress-Archive -Path "pacote/*" -DestinationPath "Editor-de-PDF-Windows-Portable-v0.3.0.zip" -Force
 
-      - name: Publicar diretamente no Release v0.2.3
+      - name: Publicar diretamente no Release v0.3.0
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.2.3"
-          $arquivo = "Editor-de-PDF-Windows-Portable-v0.2.3.zip"
+          $tag = "v0.3.0"
+          $arquivo = "Editor-de-PDF-Windows-Portable-v0.3.0.zip"
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
@@ -86,6 +86,6 @@ jobs:
           }
           else {
             gh release create $tag $arquivo `
-              --title "Editor de PDF v0.2.3" `
-              --notes "Windows Portable v0.2.3 com ajuste fino geral de layout: pre-visualizacao passa a encaixar a pagina inteira com melhor aproveitamento vertical; coluna Acoes fica mais larga e compacta; controles de edicao ficam legiveis; configuracoes e faixa de miniaturas foram refinadas. Mantidos Ctrl+Z, drag & drop, capa sem corte, icone moderno e publicacao direta em Releases."
+              --title "Editor de PDF v0.3.0" `
+              --notes "Windows Portable v0.3.0 com novo layout moderno aprovado: ferramentas de edicao em botoes quadrados com icones, controles de zoom e Ajustar, preview ampliada, paineis refinados, faixa de paginas modernizada, Ctrl+Z, drag & drop e capa sem corte. Publicacao direta em Releases."
           }
