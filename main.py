@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -36,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Editor de PDF"
-APP_VERSION = "0.2.3"
+APP_VERSION = "0.3.0"
 STANDARD_PAGE_W = 595.276  # largura A4 em pontos; todas as paginas internas usam esta largura
 CONTENT_MARGIN_PT = 2.0    # margem interna minima (aprox. 0,7 mm)
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
@@ -90,6 +91,7 @@ class PageData:
 
 class CropLabel(QLabel):
     cropSelected = Signal(float, float, float, float)
+    zoomChanged = Signal(int)
 
     def __init__(self):
         super().__init__()
@@ -103,6 +105,7 @@ class CropLabel(QLabel):
         self._dragging = False
         self._start = None
         self._rubber = QRect()
+        self._zoom_factor = 1.0
 
     def sizeHint(self):
         return QSize(640, 480)
@@ -121,6 +124,19 @@ class CropLabel(QLabel):
     def set_source_pixmap(self, pixmap: Optional[QPixmap]):
         self._source_pixmap = pixmap
         self._rubber = QRect()
+        self._zoom_factor = 1.0
+        self.update_scaled()
+
+    def zoom_in(self):
+        self._zoom_factor = min(3.0, self._zoom_factor + 0.15)
+        self.update_scaled()
+
+    def zoom_out(self):
+        self._zoom_factor = max(0.55, self._zoom_factor - 0.15)
+        self.update_scaled()
+
+    def fit_to_view(self):
+        self._zoom_factor = 1.0
         self.update_scaled()
 
     def resizeEvent(self, event):
@@ -133,13 +149,24 @@ class CropLabel(QLabel):
             self._display_rect = QRect()
             return
         available = self.contentsRect().adjusted(18, 18, -18, -18)
-        scaled = self._source_pixmap.scaled(
+        if available.width() <= 0 or available.height() <= 0:
+            return
+        fitted = self._source_pixmap.scaled(
             available.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        target = QSize(
+            max(1, round(fitted.width() * self._zoom_factor)),
+            max(1, round(fitted.height() * self._zoom_factor)),
+        )
+        scaled = self._source_pixmap.scaled(
+            target, Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         super().setPixmap(scaled)
         x = available.x() + (available.width() - scaled.width()) // 2
         y = available.y() + (available.height() - scaled.height()) // 2
         self._display_rect = QRect(x, y, scaled.width(), scaled.height())
+        percent = max(1, round(100 * scaled.width() / max(1, self._source_pixmap.width())))
+        self.zoomChanged.emit(percent)
         self.update()
 
     def mousePressEvent(self, event):
@@ -233,7 +260,7 @@ class EditorPDF(QMainWindow):
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1480, 900)
-        self.setMinimumSize(1120, 720)
+        self.setMinimumSize(1240, 760)
         self.setAcceptDrops(True)
 
         self.pages: dict[str, PageData] = {}
@@ -328,7 +355,7 @@ class EditorPDF(QMainWindow):
         left_layout.setContentsMargins(14, 14, 14, 14)
         left_layout.setSpacing(8)
 
-        left_title = QLabel("AÇÕES")
+        left_title = QLabel("IMPORTAR")
         left_title.setObjectName("sectionTitle")
         left_layout.addWidget(left_title)
 
@@ -350,31 +377,44 @@ class EditorPDF(QMainWindow):
         btn_cover.clicked.connect(self.choose_cover)
         left_layout.addWidget(btn_cover)
 
-        # Todas as ferramentas de edição ficam FORA da área de pré-visualização.
+        # Ferramentas de edicao em cards quadrados, sempre fora da pre-visualizacao.
+        tools_title = QLabel("EDIÇÃO DA PÁGINA")
+        tools_title.setObjectName("sectionTitle")
+        left_layout.addWidget(tools_title)
+
         edit_tools = QFrame()
         edit_tools.setObjectName("cropToolsCard")
-        tools_layout = QVBoxLayout(edit_tools)
-        tools_layout.setContentsMargins(9, 9, 9, 9)
-        tools_layout.setSpacing(6)
-        tools_title = QLabel("EDIÇÃO DA PÁGINA")
-        tools_title.setObjectName("fieldLabel")
-        tools_layout.addWidget(tools_title)
+        tools_grid = QGridLayout(edit_tools)
+        tools_grid.setContentsMargins(0, 0, 0, 0)
+        tools_grid.setHorizontalSpacing(8)
+        tools_grid.setVerticalSpacing(8)
 
-        self.btn_crop = QPushButton("⌗  Selecionar corte")
-        self.btn_crop.setObjectName("editPrimary")
+        self.btn_crop = QPushButton("⌗\nSelecionar\ncorte")
+        self.btn_crop.setObjectName("toolPrimary")
         self.btn_crop.clicked.connect(self.toggle_crop)
-        self.btn_clear_crop = QPushButton("Remover recorte")
+        self.btn_clear_crop = QPushButton("▣\nRemover\nrecorte")
+        self.btn_clear_crop.setObjectName("toolCropClear")
         self.btn_clear_crop.clicked.connect(self.clear_crop)
-        btn_left = QPushButton("↶  Girar à esquerda")
+        btn_left = QPushButton("↶\nGirar à\nesquerda")
+        btn_left.setObjectName("toolRotate")
         btn_left.clicked.connect(lambda: self.rotate_current(-90))
-        btn_right = QPushButton("↷  Girar à direita")
+        btn_right = QPushButton("↷\nGirar à\ndireita")
+        btn_right.setObjectName("toolRotate")
         btn_right.clicked.connect(lambda: self.rotate_current(90))
-        btn_del = QPushButton("⌫  Excluir página")
+        btn_del = QPushButton("⌫   Excluir página")
+        btn_del.setObjectName("toolDelete")
         btn_del.clicked.connect(self.delete_current)
 
-        for b in (self.btn_crop, self.btn_clear_crop, btn_left, btn_right, btn_del):
-            b.setMinimumHeight(34)
-            tools_layout.addWidget(b)
+        for b in (self.btn_crop, self.btn_clear_crop, btn_left, btn_right):
+            b.setMinimumSize(112, 88)
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn_del.setMinimumHeight(54)
+
+        tools_grid.addWidget(self.btn_crop, 0, 0)
+        tools_grid.addWidget(self.btn_clear_crop, 0, 1)
+        tools_grid.addWidget(btn_left, 1, 0)
+        tools_grid.addWidget(btn_right, 1, 1)
+        tools_grid.addWidget(btn_del, 2, 0, 1, 2)
         left_layout.addWidget(edit_tools)
 
         drop = QLabel("☁\n\nArraste imagens\nou PDFs aqui\n\nJPG • PNG • WebP • PDF")
@@ -406,12 +446,35 @@ class EditorPDF(QMainWindow):
         center_head.addStretch(1)
         self.page_indicator = QLabel("Nenhuma página selecionada")
         self.page_indicator.setObjectName("mutedText")
+        self.page_indicator.setMaximumWidth(250)
         center_head.addWidget(self.page_indicator)
+
+        btn_zoom_out = QPushButton("−")
+        btn_zoom_out.setObjectName("zoomButton")
+        btn_zoom_out.setFixedSize(38, 34)
+        self.zoom_label = QLabel("100%")
+        self.zoom_label.setObjectName("zoomValue")
+        self.zoom_label.setAlignment(Qt.AlignCenter)
+        self.zoom_label.setMinimumWidth(50)
+        btn_zoom_in = QPushButton("+")
+        btn_zoom_in.setObjectName("zoomButton")
+        btn_zoom_in.setFixedSize(38, 34)
+        btn_fit = QPushButton("⛶  Ajustar")
+        btn_fit.setObjectName("zoomFit")
+        btn_fit.setMinimumHeight(34)
+        center_head.addWidget(btn_zoom_out)
+        center_head.addWidget(self.zoom_label)
+        center_head.addWidget(btn_zoom_in)
+        center_head.addWidget(btn_fit)
         center_layout.addLayout(center_head)
 
         self.preview = CropLabel()
         self.preview.setObjectName("previewArea")
         self.preview.cropSelected.connect(self.apply_crop)
+        self.preview.zoomChanged.connect(lambda value: self.zoom_label.setText(f"{value}%"))
+        btn_zoom_out.clicked.connect(self.preview.zoom_out)
+        btn_zoom_in.clicked.connect(self.preview.zoom_in)
+        btn_fit.clicked.connect(self.preview.fit_to_view)
         center_layout.addWidget(self.preview, 1)
 
         splitter.addWidget(center)
@@ -505,8 +568,14 @@ class EditorPDF(QMainWindow):
         pages_title = QLabel("PÁGINAS")
         pages_title.setObjectName("sectionTitle")
         pages_head.addWidget(pages_title)
-        pages_head.addWidget(QLabel("arraste para reordenar"))
+        reorder_hint = QLabel("Arraste para reordenar")
+        reorder_hint.setObjectName("mutedText")
+        pages_head.addWidget(reorder_hint)
         pages_head.addStretch(1)
+        btn_add_pages = QPushButton("＋  Adicionar páginas")
+        btn_add_pages.setObjectName("pagesAdd")
+        btn_add_pages.clicked.connect(self.add_images)
+        pages_head.addWidget(btn_add_pages)
         self.pages_count = QLabel("0 página(s)")
         self.pages_count.setObjectName("mutedText")
         pages_head.addWidget(self.pages_count)
@@ -533,35 +602,47 @@ class EditorPDF(QMainWindow):
 
     def _apply_theme(self):
         self.setStyleSheet("""
-            * { font-family: 'Segoe UI'; font-size: 13px; }
-            QMainWindow, #appRoot { background:#0b1220; color:#eef4ff; }
-            #header { background:#101b2b; border-bottom:1px solid #26384f; }
-            #appTitle { font-size:24px; font-weight:700; color:#f5f8ff; }
-            #appSubtitle, #mutedText { color:#8fa3bd; }
-            #panel, #pagesPanel { background:#111d2c; border:1px solid #263950; border-radius:12px; }
-            #sectionTitle { color:#c7d3e3; font-size:13px; font-weight:700; letter-spacing:1px; }
-            QPushButton { background:#1a2a3e; color:#edf4ff; border:1px solid #314861; border-radius:8px; padding:9px 12px; }
-            QPushButton:hover { background:#233951; border-color:#47709a; }
-            QPushButton:pressed { background:#152639; }
-            #primaryAction, #topPrimary, #generate, #editPrimary { background:#1769d2; border:1px solid #2c82ea; font-weight:700; }
-            #primaryAction:hover, #topPrimary:hover, #generate:hover, #editPrimary:hover { background:#2379e5; }
+            * { font-family: 'Segoe UI Variable', 'Segoe UI'; font-size: 13px; }
+            QMainWindow, #appRoot { background:#07111e; color:#f2f6ff; }
+            #header { background:#091522; border-bottom:1px solid #20344b; }
+            #appTitle { font-size:25px; font-weight:700; color:#f8fbff; }
+            #appSubtitle, #mutedText { color:#8ea4bf; }
+            #panel, #pagesPanel { background:#0d1927; border:1px solid #223950; border-radius:14px; }
+            #sectionTitle { color:#d8e4f2; font-size:13px; font-weight:700; letter-spacing:1px; border-left:3px solid #2478ff; padding-left:8px; }
+            QPushButton { background:#111f30; color:#edf5ff; border:1px solid #2b425b; border-radius:10px; padding:9px 12px; }
+            QPushButton:hover { background:#172b40; border-color:#4f79a5; }
+            QPushButton:pressed { background:#0d1a28; }
+            #primaryAction { background:#176fe0; border:1px solid #2f8cff; font-weight:700; }
+            #primaryAction:hover { background:#2580ee; }
+            #topPrimary, #generate { background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #176fff, stop:1 #7527ff); border:1px solid #6d63ff; font-weight:700; }
+            #topPrimary:hover, #generate:hover { background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #2a7cff, stop:1 #873cff); }
             #secondaryAction { text-align:left; padding-left:16px; }
-            #topAction, #topPrimary { min-height:34px; }
-            #dropZone { background:#0e1826; color:#aebed1; border:1px dashed #667b93; border-radius:10px; padding:10px; font-size:13px; }
-            #tipBox { color:#a3b4c8; background:#142235; border:1px solid #28405a; border-radius:8px; padding:8px; font-size:12px; }
-            #previewArea { background:#0b1420; border:1px solid #263a51; border-radius:10px; }
-            #editBar { background:#0e1826; border:1px solid #263950; border-radius:9px; }
-            #settingsCard, #cropToolsCard { background:#152235; border:1px solid #2a4058; border-radius:10px; }
-            #coverPreview { background:#0b1420; border:1px solid #263a51; border-radius:7px; }
+            #topAction, #topPrimary { min-height:36px; }
+            #dropZone { background:#091522; color:#b3c4d8; border:1px dashed #56718e; border-radius:12px; padding:10px; font-size:13px; }
+            #tipBox { color:#aabbd0; background:#101e2e; border:1px solid #263f58; border-radius:10px; padding:8px; font-size:12px; }
+            #previewArea { background:#080f19; border:1px solid #1f344b; border-radius:12px; }
+            #settingsCard { background:#101d2d; border:1px solid #263d55; border-radius:12px; }
+            #cropToolsCard { background:transparent; border:none; }
+            #toolPrimary, #toolCropClear, #toolRotate { background:#101d2d; border:1px solid #2a425b; border-radius:12px; font-weight:600; padding:8px; }
+            #toolPrimary { color:#76aaff; }
+            #toolCropClear { color:#ff8a65; }
+            #toolRotate { color:#54dda1; }
+            #toolPrimary:hover, #toolCropClear:hover, #toolRotate:hover { background:#17283b; border-color:#4b7096; }
+            #toolDelete { background:#151d29; color:#ff6b72; border:1px solid #48303a; border-radius:12px; font-weight:600; }
+            #toolDelete:hover { background:#251b24; border-color:#7a3948; }
+            #zoomButton, #zoomFit, #pagesAdd { background:#101d2d; border:1px solid #2a425b; border-radius:9px; padding:6px 10px; }
+            #zoomButton:hover, #zoomFit:hover, #pagesAdd:hover { background:#172a3e; border-color:#4a739e; }
+            #zoomValue { color:#dbe8f7; font-weight:600; }
+            #coverPreview { background:#080f19; border:1px solid #233a52; border-radius:10px; }
             #fieldLabel { color:#c7d3e3; font-weight:600; }
             #info { color:#9fb1c7; line-height:1.35; }
             QComboBox { background:#0e1928; color:#eef4ff; border:1px solid #38516d; border-radius:7px; padding:9px; }
             QComboBox QAbstractItemView { background:#101b2b; color:#eef4ff; selection-background-color:#1769d2; }
             QCheckBox { color:#eef4ff; spacing:8px; }
-            QListWidget { background:#0d1724; border:1px solid #253a51; border-radius:9px; padding:5px; outline:0; }
-            QListWidget::item { background:#152235; border:1px solid #2a4058; border-radius:8px; padding:5px; margin:2px; }
+            QListWidget { background:#08131f; border:1px solid #21374d; border-radius:11px; padding:6px; outline:0; }
+            QListWidget::item { background:#101f30; border:1px solid #2b435c; border-radius:10px; padding:5px; margin:3px; }
             QListWidget::item:hover { border-color:#4c759e; background:#1a2c42; }
-            QListWidget::item:selected { background:#163e70; border:2px solid #2f8cff; color:white; }
+            QListWidget::item:selected { background:#153f74; border:2px solid #2f86ff; color:white; }
             QSplitter::handle { background:#0b1220; width:7px; }
             QStatusBar { background:#09101a; color:#90a4bc; border-top:1px solid #1f3146; }
             QScrollBar:horizontal { height:9px; background:#0d1724; }
@@ -630,7 +711,7 @@ class EditorPDF(QMainWindow):
 
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("⌗  Selecionar corte")
+        self.btn_crop.setText("⌗\nSelecionar\ncorte")
         if hasattr(self, "pages_count"):
             self.pages_count.setText(f"{self.list.count()} página(s)")
 
@@ -808,7 +889,7 @@ class EditorPDF(QMainWindow):
             self.page_indicator.setText(current.text())
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("⌗  Selecionar corte")
+        self.btn_crop.setText("⌗\nSelecionar\ncorte")
         self.refresh_preview()
 
     def current_page(self) -> Optional[PageData]:
@@ -859,7 +940,7 @@ class EditorPDF(QMainWindow):
             return
         self.crop_mode = not self.crop_mode
         self.preview.set_crop_mode(self.crop_mode)
-        self.btn_crop.setText("Cancelar seleção" if self.crop_mode else "⌗  Selecionar corte")
+        self.btn_crop.setText("×\nCancelar\nseleção" if self.crop_mode else "⌗\nSelecionar\ncorte")
         self.refresh_preview(full_for_crop=self.crop_mode)
         if self.crop_mode:
             self.statusBar().showMessage("Arraste sobre a área que deseja manter.")
@@ -872,7 +953,7 @@ class EditorPDF(QMainWindow):
         page.crop = (x, y, w, h)
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("⌗  Selecionar corte")
+        self.btn_crop.setText("⌗\nSelecionar\ncorte")
         self.refresh_preview()
         self.refresh_current_thumbnail()
         self.statusBar().showMessage("Recorte aplicado. O arquivo original não foi alterado.", 4500)
@@ -887,7 +968,7 @@ class EditorPDF(QMainWindow):
         page.crop = None
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("⌗  Selecionar corte")
+        self.btn_crop.setText("⌗\nSelecionar\ncorte")
         self.refresh_preview()
         self.refresh_current_thumbnail()
         self.statusBar().showMessage("Recorte removido.", 3000)
