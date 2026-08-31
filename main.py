@@ -12,7 +12,7 @@ from typing import Optional, Tuple
 import fitz  # PyMuPDF
 from PIL import Image, ImageOps
 from PySide6.QtCore import Qt, QRect, QRectF, QSize, Signal
-from PySide6.QtGui import QAction, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QTransform
+from PySide6.QtGui import QAction, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -32,12 +32,13 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStatusBar,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 APP_NAME = "Editor de PDF"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 STANDARD_PAGE_W = 595.276  # largura A4 em pontos; todas as paginas internas usam esta largura
 CONTENT_MARGIN_PT = 2.0    # margem interna minima (aprox. 0,7 mm)
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
@@ -77,6 +78,48 @@ def save_config(data: dict) -> None:
         config_path().write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass
+
+
+def make_tool_icon(kind: str, color: str) -> QIcon:
+    pix = QPixmap(56, 56)
+    pix.fill(Qt.transparent)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    pen = QPen(QColor(color), 3.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    painter.setPen(pen)
+
+    if kind in ("crop", "clear_crop"):
+        # Cantos de recorte grandes e limpos.
+        painter.drawLine(12, 8, 12, 36)
+        painter.drawLine(12, 12, 40, 12)
+        painter.drawLine(44, 20, 44, 48)
+        painter.drawLine(16, 44, 44, 44)
+        painter.drawLine(8, 20, 36, 20)
+        painter.drawLine(20, 8, 20, 36)
+        if kind == "clear_crop":
+            red = QPen(QColor("#ff624f"), 3.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            painter.setPen(red)
+            painter.drawLine(35, 35, 49, 49)
+            painter.drawLine(49, 35, 35, 49)
+    elif kind in ("rotate_left", "rotate_right"):
+        arc_rect = QRectF(11, 11, 34, 34)
+        if kind == "rotate_left":
+            painter.drawArc(arc_rect, 35 * 16, 285 * 16)
+            painter.drawLine(11, 18, 11, 8)
+            painter.drawLine(11, 8, 21, 8)
+        else:
+            painter.drawArc(arc_rect, -140 * 16, 285 * 16)
+            painter.drawLine(45, 18, 45, 8)
+            painter.drawLine(45, 8, 35, 8)
+    elif kind == "delete":
+        painter.drawLine(18, 17, 38, 17)
+        painter.drawLine(22, 13, 34, 13)
+        painter.drawRoundedRect(QRectF(20, 20, 16, 25), 2, 2)
+        painter.drawLine(25, 25, 25, 40)
+        painter.drawLine(31, 25, 31, 40)
+
+    painter.end()
+    return QIcon(pix)
 
 
 @dataclass
@@ -349,8 +392,8 @@ class EditorPDF(QMainWindow):
         # AÇÕES — coluna esquerda
         left = QFrame()
         left.setObjectName("panel")
-        left.setMinimumWidth(280)
-        left.setMaximumWidth(330)
+        left.setMinimumWidth(320)
+        left.setMaximumWidth(380)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(14, 14, 14, 14)
         left_layout.setSpacing(8)
@@ -386,29 +429,38 @@ class EditorPDF(QMainWindow):
         edit_tools.setObjectName("cropToolsCard")
         tools_grid = QGridLayout(edit_tools)
         tools_grid.setContentsMargins(0, 0, 0, 0)
-        tools_grid.setHorizontalSpacing(8)
-        tools_grid.setVerticalSpacing(8)
+        tools_grid.setHorizontalSpacing(10)
+        tools_grid.setVerticalSpacing(10)
 
-        self.btn_crop = QPushButton("⌗\nSelecionar\ncorte")
-        self.btn_crop.setObjectName("toolPrimary")
+        def make_editor_button(label: str, icon_kind: str, icon_color: str, object_name: str) -> QToolButton:
+            button = QToolButton()
+            button.setText(label)
+            button.setIcon(make_tool_icon(icon_kind, icon_color))
+            button.setIconSize(QSize(44, 44))
+            button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            button.setObjectName(object_name)
+            button.setMinimumSize(134, 108)
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            return button
+
+        self.btn_crop = make_editor_button("Selecionar corte", "crop", "#4f9cff", "toolPrimary")
         self.btn_crop.clicked.connect(self.toggle_crop)
-        self.btn_clear_crop = QPushButton("▣\nRemover\nrecorte")
-        self.btn_clear_crop.setObjectName("toolCropClear")
+        self.btn_clear_crop = make_editor_button("Remover recorte", "clear_crop", "#ff755f", "toolCropClear")
         self.btn_clear_crop.clicked.connect(self.clear_crop)
-        btn_left = QPushButton("↶\nGirar à\nesquerda")
-        btn_left.setObjectName("toolRotate")
+        btn_left = make_editor_button("Girar à esquerda", "rotate_left", "#39d99a", "toolRotate")
         btn_left.clicked.connect(lambda: self.rotate_current(-90))
-        btn_right = QPushButton("↷\nGirar à\ndireita")
-        btn_right.setObjectName("toolRotate")
+        btn_right = make_editor_button("Girar à direita", "rotate_right", "#39d99a", "toolRotate")
         btn_right.clicked.connect(lambda: self.rotate_current(90))
-        btn_del = QPushButton("⌫   Excluir página")
-        btn_del.setObjectName("toolDelete")
-        btn_del.clicked.connect(self.delete_current)
 
-        for b in (self.btn_crop, self.btn_clear_crop, btn_left, btn_right):
-            b.setMinimumSize(112, 88)
-            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        btn_del.setMinimumHeight(54)
+        btn_del = QToolButton()
+        btn_del.setText("Excluir página")
+        btn_del.setIcon(make_tool_icon("delete", "#ff535d"))
+        btn_del.setIconSize(QSize(32, 32))
+        btn_del.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        btn_del.setObjectName("toolDelete")
+        btn_del.setMinimumHeight(60)
+        btn_del.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn_del.clicked.connect(self.delete_current)
 
         tools_grid.addWidget(self.btn_crop, 0, 0)
         tools_grid.addWidget(self.btn_clear_crop, 0, 1)
@@ -424,11 +476,6 @@ class EditorPDF(QMainWindow):
         drop.setWordWrap(True)
         left_layout.addWidget(drop)
 
-        tip = QLabel("ⓘ  Você também pode reorganizar as páginas arrastando as miniaturas na faixa inferior.")
-        tip.setObjectName("tipBox")
-        tip.setWordWrap(True)
-        tip.setMaximumHeight(68)
-        left_layout.addWidget(tip)
         left_layout.addStretch(1)
         splitter.addWidget(left)
 
@@ -476,8 +523,6 @@ class EditorPDF(QMainWindow):
         btn_zoom_in.clicked.connect(self.preview.zoom_in)
         btn_fit.clicked.connect(self.preview.fit_to_view)
         center_layout.addWidget(self.preview, 1)
-
-        splitter.addWidget(center)
 
         # CONFIGURAÇÕES — coluna direita
         right = QFrame()
@@ -555,7 +600,6 @@ class EditorPDF(QMainWindow):
         btn_generate.clicked.connect(self.generate_pdf)
         right_layout.addWidget(btn_generate)
         splitter.addWidget(right)
-        splitter.setSizes([300, 900, 315])
 
         # Faixa de miniaturas inferior
         pages_panel = QFrame()
@@ -596,7 +640,16 @@ class EditorPDF(QMainWindow):
         self.list.currentItemChanged.connect(self.on_current_changed)
         self.list.filesDropped.connect(self.import_dropped_files)
         pages_layout.addWidget(self.list)
-        workspace_layout.addWidget(pages_panel)
+        pages_panel.setMaximumHeight(174)
+
+        middle = QWidget()
+        middle_layout = QVBoxLayout(middle)
+        middle_layout.setContentsMargins(0, 0, 0, 0)
+        middle_layout.setSpacing(10)
+        middle_layout.addWidget(center, 1)
+        middle_layout.addWidget(pages_panel, 0)
+        splitter.insertWidget(1, middle)
+        splitter.setSizes([350, 900, 330])
 
         self.setStatusBar(QStatusBar())
 
@@ -612,6 +665,9 @@ class EditorPDF(QMainWindow):
             QPushButton { background:#111f30; color:#edf5ff; border:1px solid #2b425b; border-radius:10px; padding:9px 12px; }
             QPushButton:hover { background:#172b40; border-color:#4f79a5; }
             QPushButton:pressed { background:#0d1a28; }
+            QToolButton { background:#101d2d; color:#edf5ff; border:1px solid #2a425b; border-radius:12px; padding:8px 8px 10px 8px; font-size:13px; font-weight:600; }
+            QToolButton:hover { background:#17283b; border-color:#4b7096; }
+            QToolButton:pressed { background:#0d1a28; }
             #primaryAction { background:#176fe0; border:1px solid #2f8cff; font-weight:700; }
             #primaryAction:hover { background:#2580ee; }
             #topPrimary, #generate { background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #176fff, stop:1 #7527ff); border:1px solid #6d63ff; font-weight:700; }
@@ -711,7 +767,7 @@ class EditorPDF(QMainWindow):
 
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("⌗\nSelecionar\ncorte")
+        self.btn_crop.setText("Selecionar corte")
         if hasattr(self, "pages_count"):
             self.pages_count.setText(f"{self.list.count()} página(s)")
 
@@ -889,7 +945,7 @@ class EditorPDF(QMainWindow):
             self.page_indicator.setText(current.text())
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("⌗\nSelecionar\ncorte")
+        self.btn_crop.setText("Selecionar corte")
         self.refresh_preview()
 
     def current_page(self) -> Optional[PageData]:
@@ -940,7 +996,7 @@ class EditorPDF(QMainWindow):
             return
         self.crop_mode = not self.crop_mode
         self.preview.set_crop_mode(self.crop_mode)
-        self.btn_crop.setText("×\nCancelar\nseleção" if self.crop_mode else "⌗\nSelecionar\ncorte")
+        self.btn_crop.setText("Cancelar seleção" if self.crop_mode else "Selecionar corte")
         self.refresh_preview(full_for_crop=self.crop_mode)
         if self.crop_mode:
             self.statusBar().showMessage("Arraste sobre a área que deseja manter.")
@@ -953,7 +1009,7 @@ class EditorPDF(QMainWindow):
         page.crop = (x, y, w, h)
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("⌗\nSelecionar\ncorte")
+        self.btn_crop.setText("Selecionar corte")
         self.refresh_preview()
         self.refresh_current_thumbnail()
         self.statusBar().showMessage("Recorte aplicado. O arquivo original não foi alterado.", 4500)
@@ -968,7 +1024,7 @@ class EditorPDF(QMainWindow):
         page.crop = None
         self.crop_mode = False
         self.preview.set_crop_mode(False)
-        self.btn_crop.setText("⌗\nSelecionar\ncorte")
+        self.btn_crop.setText("Selecionar corte")
         self.refresh_preview()
         self.refresh_current_thumbnail()
         self.statusBar().showMessage("Recorte removido.", 3000)
